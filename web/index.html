@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>US Renewables Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="panel">
+    <header>
+      <h1>US Renewables Map</h1>
+      <p class="sub">Prototype. Plant output is <strong>estimated</strong> by splitting each grid region's
+        hourly EIA-930 total among its plants.</p>
+    </header>
+
+    <section id="time">
+      <div class="time-row">
+        <div>
+          <div id="time-local" class="time-main">–</div>
+          <div id="time-utc" class="muted small">–</div>
+        </div>
+        <div class="buttons">
+          <button id="play" type="button" aria-label="Play">▶</button>
+          <button id="latest" type="button">Latest</button>
+        </div>
+      </div>
+      <input id="slider" type="range" min="0" max="0" value="0" aria-label="Hour">
+    </section>
+
+    <section>
+      <table id="totals">
+        <thead><tr><th></th><th>Fuel</th><th class="num">Now (GW)</th><th class="num">Cap. (GW)</th><th class="num">%</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="notice" hidden></section>
+
+    <section>
+      <h2>Largest estimated output</h2>
+      <table id="top">
+        <thead><tr><th>Plant</th><th>Fuel</th><th class="num">Est. MW</th><th class="num">Cap.</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <footer class="muted small">
+      <p>Circle area is proportional to MW: the outline is nameplate capacity, the solid fill is the
+        estimate for the selected hour.</p>
+      <p id="sources"></p>
+    </footer>
+  </aside>
+
+  <main id="map"></main>
+
+  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
