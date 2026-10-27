@@ -18,26 +18,41 @@
         hourly total among its plants<span id="weighting"></span>. Ontario's and Alberta's large plants are metered.</p>
     </header>
 
-    <section id="time">
+    <section id="time" class="card">
       <div class="time-row">
         <div>
           <div id="time-local" class="time-main">–</div>
           <div id="time-utc" class="muted small">–</div>
         </div>
         <div class="buttons">
-          <button id="play" type="button" aria-label="Play">▶</button>
+          <button id="play" type="button" aria-label="Play through the hours">▶</button>
           <button id="latest" type="button">Latest</button>
         </div>
       </div>
       <input id="slider" type="range" min="0" max="0" value="0" aria-label="Hour">
+      <ul id="feeds" class="chips" aria-label="Data sources for this hour"></ul>
       <p id="coverage" class="muted small"></p>
     </section>
 
-    <section>
-      <table id="totals">
-        <thead><tr><th></th><th>Fuel</th><th class="num">Now (GW)</th><th class="num">Cap. (GW)</th><th class="num">%</th></tr></thead>
-        <tbody></tbody>
-      </table>
+    <section aria-labelledby="kpi-title">
+      <h2 id="kpi-title">Generation this hour</h2>
+      <div id="kpis" class="kpi-grid"></div>
+      <p class="muted small note">Percent is of the capacity in regions reporting this hour. Click a fuel to show or hide it on the map.</p>
+    </section>
+
+    <section class="card" aria-labelledby="chart-title">
+      <div class="card-head">
+        <h2 id="chart-title">Share of reporting capacity generating</h2>
+        <ul id="chart-legend" class="legend" aria-hidden="true"></ul>
+      </div>
+      <div class="chart-box">
+        <canvas id="history" role="img" aria-label="Line chart: share of reporting capacity generating, by fuel, over the last 48 hours"></canvas>
+      </div>
+      <p class="muted small note">Last 48 hours. Shaded hours have only part of the fleet reporting. Click or drag to change the hour.</p>
+      <details class="table-view">
+        <summary>Hourly values as a table</summary>
+        <div class="scroll"><table id="history-table" class="data-table"></table></div>
+      </details>
     </section>
 
     <section class="layers small">
@@ -45,16 +60,33 @@
       <label><input type="checkbox" id="show-flows" checked> Cross-border flows</label>
       <label hidden><input type="checkbox" id="show-wind" checked> Wind at 100 m</label>
       <label hidden><input type="checkbox" id="show-clouds"> Cloud cover</label>
+      <label hidden><input type="checkbox" id="show-roses"> Wind roses</label>
+      <p id="rose-legend" class="muted small rose-legend" hidden></p>
     </section>
 
     <section id="notice" hidden></section>
 
-    <section>
-      <h2>Largest estimated output</h2>
-      <table id="top">
-        <thead><tr><th>Plant</th><th>Fuel</th><th class="num">Est. MW</th><th class="num">Cap.</th></tr></thead>
+    <section aria-labelledby="plants-title">
+      <h2 id="plants-title">Largest output this hour</h2>
+      <div class="filter-row">
+        <div class="segmented" role="group" aria-label="Country">
+          <button type="button" data-country="all" aria-pressed="true">All</button>
+          <button type="button" data-country="US" aria-pressed="false">US</button>
+          <button type="button" data-country="CA" aria-pressed="false">Canada</button>
+        </div>
+        <input id="plant-search" type="search" placeholder="Search plants" aria-label="Search plants">
+      </div>
+      <table id="top" class="data-table">
+        <thead><tr>
+          <th><button type="button" data-sort="name">Plant</button></th>
+          <th><button type="button" data-sort="fuel">Fuel</button></th>
+          <th class="num"><button type="button" data-sort="mw">MW</button></th>
+          <th class="num"><button type="button" data-sort="cap">Cap.</button></th>
+          <th class="num"><button type="button" data-sort="pct">%</button></th>
+        </tr></thead>
         <tbody></tbody>
       </table>
+      <p id="top-count" class="muted small note"></p>
     </section>
 
     <footer class="muted small">
@@ -70,6 +102,7 @@
 
   <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/deck.gl@9.4.0/dist.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
   <script src="weather.js"></script>
   <script src="app.js"></script>
 </body>

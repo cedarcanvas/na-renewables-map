@@ -38,7 +38,20 @@ BC, Manitoba and Newfoundland and Labrador show capacity only.
 `web/` is static: MapLibre for the map, deck.gl for Québec's flow arcs, and a
 canvas over the map for wind particles (`weather.js`, the technique behind
 earth.nullschool and Windy). Layers: plants (outline = capacity, fill = the
-hour's output), grid regions, Québec flows, wind at 100 m, and cloud cover.
+hour's output), grid regions, Québec flows, wind at 100 m, cloud cover, and
+wind roses: 48 hours of GFS wind as 16 sectors stacked by speed, with a needle
+for the selected hour. Zoomed out, one rose stands for each cluster of wind
+capacity; from zoom 6.5 each farm of 100 MW or more gets its own, and every
+wind farm's popup shows one. HIFLD outlines trace utility service territories,
+so `regions.py` closes gaps under about 10 km, drops islands and holes under
+about 500 km² and simplifies, which takes them from about 5,000 parts to 130.
+The side panel is a small dashboard: a stat tile per fuel (GW now and the share
+of reporting capacity generating; click to show or hide that fuel), a 48-hour
+chart of those shares (Chart.js; click or drag it to change the hour; shaded
+hours have only part of the fleet reporting) with an hourly table view, status
+chips for each data source, and a sortable plant table filtered by country and
+name. The fuel colours pass the dataviz palette checks (contrast, lightness,
+colour-blind separation) in both themes.
 A theme button switches Auto (follows the system), Light and Dark, including
 the basemap (OpenFreeMap Positron / Dark). With "reduce motion" set in the
 system, wind is drawn as still streaks.
@@ -131,5 +144,7 @@ Region codes that differ between the two EIA datasets are mapped in
 ## Next
 
 - Per-farm hub heights from the US Wind Turbine Database instead of a flat 100 m
-- Real per-plant output for Alberta (AESO) and Ontario (IESO)
-- Generation chart and hosting
+- From the GB map: Normalise and colour-scale display options, curtailment,
+  outage notices, pressure / temperature / solar radiation layers, forecast
+  hours, transmission lines, satellite imagery, individual turbines
+- Hosting

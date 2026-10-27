@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from shapely.geometry import mapping, shape
+from shapely.geometry import MultiPolygon, Polygon, mapping, shape
 from shapely.ops import unary_union
 
 from .common import BA_ALIASES, RAW, WEB_DATA, download
@@ -27,6 +27,14 @@ PROVINCES_URL = "https://naciscdn.org/naturalearth/10m/cultural/ne_10m_admin_1_s
 
 # Degrees; about 1–2 km, plenty for outlines at continental zooms.
 SIMPLIFY = 0.015
+
+# Generalization, in degrees: HIFLD traces utility service territories, so many
+# regions arrive as hundreds of slivers and enclaves. Close gaps narrower than
+# about 2 × CLOSE, drop islands and holes under MIN_PART (keeping each region's
+# largest part however small), then simplify the result.
+CLOSE = 0.05             # ~5 km
+MIN_PART = 0.05          # square degrees, ~500 km² at mid-latitudes
+GENERALIZE = 0.02        # final simplification tolerance
 
 # HIFLD control-area ID (EIA utility ID) -> EIA-930 BA code.
 EIA_CODES = {
@@ -77,6 +85,19 @@ def _tidy(name):
     return " ".join(w.lower() if i and w in small else w for i, w in enumerate(words))
 
 
+def _generalize(geom):
+    """Fuse nearby fragments, drop small islands and holes, then simplify."""
+    closed = geom.buffer(CLOSE, join_style="round").buffer(-CLOSE, join_style="round")
+    parts = sorted(getattr(closed, "geoms", [closed]), key=lambda p: p.area, reverse=True)
+    kept = []
+    for i, part in enumerate(parts):
+        if i and part.area < MIN_PART:
+            continue
+        holes = [h for h in part.interiors if Polygon(h).area >= MIN_PART]
+        kept.append(Polygon(part.exterior, holes))
+    return MultiPolygon(kept).simplify(GENERALIZE, preserve_topology=True) if kept else geom
+
+
 def _ogr_to_geojson(src, dst, *args):
     subprocess.run(["ogr2ogr", "-f", "GeoJSON", "-simplify", str(SIMPLIFY),
                     "-lco", "COORDINATE_PRECISION=4", dst, src, *args], check=True)
@@ -110,7 +131,7 @@ def build():
 
     features = []
     for code, parts in sorted(shapes.items()):
-        geom = unary_union([g.buffer(0) for g in parts])
+        geom = _generalize(unary_union([g.buffer(0) for g in parts]))
         props = {"code": code, "name": names[code], "short": SHORT.get(code, code), "country": country[code]}
         features.append({"type": "Feature", "geometry": mapping(geom), "properties": props})
         # Inside the shape, unlike a centroid, which can fall outside an odd outline.

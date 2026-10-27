@@ -1,6 +1,7 @@
 const FUELS = {
   wind: { label: "Wind", short: "Wind", color: "#1f9e89" },
-  solar: { label: "Solar", short: "Solar", color: "#e9a800" },
+  // Validated (dataviz palette checks) for both themes; the brighter #e9a800 failed lightness and contrast.
+  solar: { label: "Solar", short: "Solar", color: "#b88300" },
   hydro: { label: "Hydro", short: "Hydro", color: "#3a6fd8" },
   geothermal: { label: "Geothermal", short: "Geo", color: "#c2410c" },
 };
@@ -11,6 +12,8 @@ const state = {
   hour: 0,
   visible: new Set(Object.keys(FUELS)),
   playing: null,
+  partialHours: [],   // per hour: true where the reporting fleet is under PARTIAL of capacity
+  table: { sort: "mw", dir: "desc", country: "all", query: "" },
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -116,6 +119,11 @@ function applyThemeColors() {
   paint("clouds", "raster-brightness-min", c.cloudBrightness[0]);
   paint("clouds", "raster-brightness-max", c.cloudBrightness[1]);
   updateFlows();
+  updateHistoryTheme();
+  if (weather.roses) {
+    weather.roses.render();
+    renderRoseLegend();
+  }
 }
 
 async function loadJSON(url) {
@@ -159,7 +167,9 @@ async function init() {
   });
   $("#play").addEventListener("click", () => (state.playing ? stop() : play()));
 
-  buildTotalsTable();
+  buildKpis();
+  setupTable();
+  buildHistory();
   renderPanel();
   renderSources();
 
@@ -460,54 +470,66 @@ function capacityByFuel() {
   return caps;
 }
 
-function buildTotalsTable() {
-  const tbody = $("#totals tbody");
-  tbody.innerHTML = "";
+// Capacity (MW) of plants whose region reported an hour; all of it for older data files.
+function coveredCap(fuel, caps, hour = state.hour) {
+  return state.gen?.covered_cap?.[fuel]?.[hour] ?? caps[fuel];
+}
+
+// Share (%) of reporting capacity generating. Solar reads slightly negative at night
+// (inverters draw power), so it's floored at zero.
+function shareAt(fuel, caps, hour) {
+  const mw = state.gen?.totals[fuel]?.[hour];
+  const covered = coveredCap(fuel, caps, hour);
+  return mw == null || !covered ? null : (100 * Math.max(mw, 0)) / covered;
+}
+
+const listFormat = (items) => new Intl.ListFormat("en", { type: "conjunction" }).format(items);
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const hourLabel = (iso, opts) => new Date(iso).toLocaleString(undefined, opts);
+
+// Stat tiles: one per fuel; each is also that fuel's on/off switch for the map.
+function buildKpis() {
+  const grid = $("#kpis");
+  grid.replaceChildren();
   for (const [key, fuel] of Object.entries(FUELS)) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><input type="checkbox" checked aria-label="Show ${fuel.label}"></td>
-      <td><span class="swatch" style="background:${fuel.color}"></span>${fuel.label}</td>
-      <td class="num" data-now></td><td class="num" data-cap></td><td class="num" data-pct></td>`;
-    tr.querySelector("input").addEventListener("change", (e) => {
-      e.target.checked ? state.visible.add(key) : state.visible.delete(key);
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.className = "kpi";
+    tile.dataset.fuel = key;
+    tile.style.setProperty("--fuel", fuel.color);
+    tile.setAttribute("aria-pressed", "true");
+    tile.innerHTML = `<div class="kpi-label"><span class="swatch" style="background:${fuel.color}"></span>
+      <span class="name"></span><span class="partial-tag" hidden>partial</span></div>
+      <div class="kpi-value"></div><div class="meter"><span></span></div><div class="kpi-sub"></div>`;
+    tile.querySelector(".name").textContent = fuel.label;
+    tile.addEventListener("click", () => {
+      const on = !state.visible.has(key);
+      on ? state.visible.add(key) : state.visible.delete(key);
+      tile.setAttribute("aria-pressed", String(on));
       if (map.getLayer("capacity")) applyFuelFilter();
       renderTop();
     });
-    tr.dataset.fuel = key;
-    tbody.appendChild(tr);
+    grid.append(tile);
   }
 }
 
-// Capacity (MW) of plants whose region reported this hour; all of it for older data files.
-function coveredCap(fuel, caps) {
-  return state.gen?.covered_cap?.[fuel]?.[state.hour] ?? caps[fuel];
-}
-
-function renderPanel() {
-  const caps = capacityByFuel();
-  for (const tr of document.querySelectorAll("#totals tbody tr")) {
-    const fuel = tr.dataset.fuel;
+function renderKpis(caps) {
+  for (const tile of document.querySelectorAll(".kpi")) {
+    const fuel = tile.dataset.fuel;
     const now = state.gen?.totals[fuel]?.[state.hour];
-    const covered = coveredCap(fuel, caps);
-    const partial = covered < PARTIAL * caps[fuel];
-    tr.querySelector("[data-cap]").textContent = fmt(caps[fuel] / 1000, 1);
-    // Solar reads slightly negative at night (inverters draw power); show that as zero.
     const mw = now == null ? null : Math.max(now, 0);
-    tr.querySelector("[data-now]").textContent = mw == null ? "–" : fmt(mw / 1000, 1) + (partial ? "*" : "");
-    // % of the capacity that reported, so a partial hour isn't read as a collapse.
-    tr.querySelector("[data-pct]").textContent = mw == null || !covered ? "–" : fmt((100 * mw) / covered);
+    const covered = coveredCap(fuel, caps);
+    const share = shareAt(fuel, caps, state.hour);
+    const partial = covered < PARTIAL * caps[fuel];
+    tile.querySelector(".kpi-value").innerHTML = mw == null ? "–" : `${fmt(mw / 1000, 1)} <small>GW</small>`;
+    tile.querySelector(".meter span").style.width = `${Math.min(share ?? 0, 100)}%`;
+    tile.querySelector(".kpi-sub").textContent = share == null
+      ? `${fmt(caps[fuel] / 1000, 1)} GW of capacity`
+      : `${fmt(share)}% of ${fmt(covered / 1000, covered < 10000 ? 1 : 0)} GW reporting`;
+    tile.querySelector(".partial-tag").hidden = !partial;
+    tile.title = `${FUELS[fuel].label}: ${fmt(caps[fuel] / 1000, 1)} GW of capacity in all.` +
+      (partial ? ` Regions reporting this hour hold ${fmt((100 * covered) / caps[fuel])}% of it.` : "");
   }
-  renderCoverage(caps);
-
-  if (state.gen) {
-    const t = new Date(state.gen.hours[state.hour]);
-    $("#time-local").textContent = t.toLocaleString(undefined, {
-      weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
-    });
-    $("#time-utc").textContent = `Hour ending ${state.gen.hours[state.hour].replace("T", " ").replace(":00Z", " UTC")}`;
-  }
-  renderTop();
 }
 
 // Live feeds with data at the selected hour, and live feeds that haven't reached it yet.
@@ -516,46 +538,301 @@ function liveFeedsNow() {
   const started = Object.values(state.gen.live ?? {}).filter((l) => l.from <= hour);
   const now = new Set(started.filter((l) => hour <= l.until).map((l) => l.feed));
   const behind = new Set(started.filter((l) => hour > l.until && !now.has(l.feed)).map((l) => l.feed));
-  return { now: [...now], behind: [...behind] };
+  return { now: [...now].sort(), behind: [...behind].sort() };
 }
 
-function renderCoverage(caps) {
-  const el = $("#coverage");
-  if (!state.gen) return (el.textContent = "");
+// Status chips: an icon and a label for each source, so state never rests on colour.
+function renderStatus(caps) {
+  const ul = $("#feeds");
+  ul.replaceChildren();
+  if (!state.gen) return ($("#coverage").textContent = "");
+  const chip = (ok, text, title) => {
+    const li = document.createElement("li");
+    li.className = ok ? "ok" : "behind";
+    li.title = title;
+    const icon = document.createElement("span");
+    icon.className = "icon";
+    icon.textContent = ok ? "●" : "◐";
+    li.append(icon, document.createTextNode(text));
+    ul.append(li);
+  };
   const hour = state.gen.hours[state.hour];
-  const { now: feeds, behind } = liveFeedsNow();
-  const list = (items) => new Intl.ListFormat("en", { type: "conjunction" }).format(items);
-  const lagging = behind.length
-    ? ` ${list(behind)} ${behind.length > 1 ? "haven't" : "hasn't"} reached this hour yet.`
-    : "";
-  let text;
-  if (!feeds.length && !behind.length) text = "Source: EIA-930.";
-  else if (state.gen.eia_until && hour > state.gen.eia_until)
-    text = `Source: live grid-operator feeds (${feeds.join(", ")}).${lagging} Other regions appear once EIA-930 publishes them.`;
-  else text = `Source: EIA-930, plus live grid-operator feeds (${feeds.join(", ")}) where EIA hasn't reported yet.${lagging}`;
+  const eiaHas = !state.gen.eia_until || hour <= state.gen.eia_until;
+  chip(eiaHas, eiaHas ? "EIA-930" : "EIA-930 · pending",
+    eiaHas ? "EIA-930's hourly data covers this hour" : "EIA-930 hasn't published this hour; its regions show grey");
+  const { now, behind } = liveFeedsNow();
+  for (const f of now) chip(true, f, `${f}: live data for this hour`);
+  for (const f of behind) chip(false, `${f} · behind`, `${f} hasn't reached this hour yet`);
 
   const partial = Object.entries(FUELS)
     .filter(([fuel]) => coveredCap(fuel, caps) < PARTIAL * caps[fuel])
     .map(([fuel, f]) => `${fmt((100 * coveredCap(fuel, caps)) / caps[fuel])}% of ${f.label.toLowerCase()}`);
-  if (partial.length) text += ` *Regions reporting this hour hold ${partial.join(", ")} capacity.`;
-  el.textContent = text;
+  $("#coverage").textContent = partial.length ? `Regions reporting this hour hold ${listFormat(partial)} capacity.` : "";
+}
+
+function renderPanel() {
+  const caps = capacityByFuel();
+  renderKpis(caps);
+  renderStatus(caps);
+  if (state.gen) {
+    const iso = state.gen.hours[state.hour];
+    $("#time-local").textContent = hourLabel(iso, {
+      weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+    });
+    $("#time-utc").textContent = `Hour ending ${iso.replace("T", " ").replace(":00Z", " UTC")}`;
+  }
+  historyChart?.draw(); // moves the selected-hour marker
+  renderTop();
+}
+
+// --- 48-hour chart: share of reporting capacity, one line per fuel ------------------
+
+let historyChart = null;
+
+// Under the lines: shading for hours with only part of the fleet reporting, and
+// a hairline at the selected hour.
+const historyMarks = {
+  id: "historyMarks",
+  beforeDatasetsDraw(chart) {
+    const { ctx, chartArea: area, scales: { x } } = chart;
+    const step = x.getPixelForValue(1) - x.getPixelForValue(0);
+    ctx.save();
+    ctx.fillStyle = cssVar("--hover");
+    state.partialHours.forEach((partial, i) => {
+      if (partial) ctx.fillRect(x.getPixelForValue(i) - step / 2, area.top, step, area.bottom - area.top);
+    });
+    const sx = x.getPixelForValue(state.hour);
+    ctx.strokeStyle = cssVar("--text");
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sx, area.top);
+    ctx.lineTo(sx, area.bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+
+function historyTheme() {
+  const text = cssVar("--muted"), line = cssVar("--line");
+  return {
+    ticks: text, grid: line,
+    tooltip: { backgroundColor: cssVar("--panel"), titleColor: cssVar("--text"), bodyColor: cssVar("--text"), borderColor: line },
+    ring: cssVar("--panel"),
+  };
+}
+
+function buildHistory() {
+  const card = $("#history").closest(".card");
+  if (!state.gen || typeof Chart === "undefined") return (card.hidden = true);
+  const caps = capacityByFuel();
+  const fuels = Object.keys(FUELS);
+  const total = fuels.reduce((s, f) => s + caps[f], 0);
+  state.partialHours = state.gen.hours.map((_, i) =>
+    fuels.reduce((s, f) => s + coveredCap(f, caps, i), 0) < PARTIAL * total);
+
+  $("#chart-legend").innerHTML = Object.values(FUELS)
+    .map((f) => `<li style="--fuel:${f.color}"><span class="key"></span>${f.label}</li>`).join("");
+
+  const t = historyTheme();
+  historyChart = new Chart($("#history"), {
+    type: "line",
+    data: {
+      labels: state.gen.hours,
+      datasets: fuels.map((fuel) => ({
+        label: FUELS[fuel].label,
+        fuel,
+        data: state.gen.hours.map((_, i) => shareAt(fuel, caps, i)),
+        borderColor: FUELS[fuel].color,
+        backgroundColor: FUELS[fuel].color,
+        borderWidth: 2,
+        borderCapStyle: "round",
+        borderJoinStyle: "round",
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHoverBorderWidth: 2,
+        pointHoverBorderColor: t.ring,
+        tension: 0.25,
+      })),
+    },
+    plugins: [historyMarks],
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      layout: { padding: { top: 4, right: 4 } },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { color: t.grid },
+          ticks: {
+            color: t.ticks, autoSkip: false, maxRotation: 0, font: { size: 10.5 },
+            // A day name at local midnight and noon in between; the tooltip has every hour.
+            callback(_, i) {
+              const d = new Date(state.gen.hours[i]);
+              if (d.getHours() === 0) return d.toLocaleDateString(undefined, { weekday: "short" });
+              if (d.getHours() === 12) return "noon";
+              return "";
+            },
+          },
+        },
+        y: {
+          min: 0, max: 100,
+          border: { display: false },
+          grid: { color: t.grid, lineWidth: 1 },
+          ticks: { color: t.ticks, stepSize: 25, font: { size: 10.5 }, callback: (v) => `${v}%` },
+        },
+      },
+      plugins: {
+        legend: { display: false }, // the HTML legend above carries the line keys
+        tooltip: {
+          ...t.tooltip, borderWidth: 1, padding: 8, usePointStyle: true, boxWidth: 14, boxHeight: 2,
+          callbacks: {
+            title: (items) => hourLabel(state.gen.hours[items[0].dataIndex],
+              { weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short" }),
+            // Value first, then the series.
+            label: (item) => {
+              const mw = state.gen.totals[item.dataset.fuel]?.[item.dataIndex];
+              return item.parsed.y == null ? ` – ${item.dataset.label}`
+                : ` ${fmt(item.parsed.y)}%  ·  ${fmt(Math.max(mw ?? 0, 0) / 1000, 1)} GW  ${item.dataset.label}`;
+            },
+            labelPointStyle: () => ({ pointStyle: "line", rotation: 0 }),
+          },
+        },
+      },
+      onClick: (event, _, chart) => scrubTo(event, chart),
+    },
+  });
+
+  // Drag along the chart to move through the hours.
+  const canvas = $("#history");
+  let dragging = false;
+  canvas.addEventListener("pointerdown", (e) => { dragging = true; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener("pointermove", (e) => dragging && scrubTo(e, historyChart));
+  canvas.addEventListener("pointerup", () => (dragging = false));
+  buildHistoryTable(caps);
+}
+
+function scrubTo(event, chart) {
+  const rect = chart.canvas.getBoundingClientRect();
+  const x = (event.native ?? event).clientX - rect.left;
+  const i = Math.round(chart.scales.x.getValueForPixel(x));
+  if (Number.isFinite(i) && i >= 0 && i < state.gen.hours.length && i !== state.hour) {
+    stop();
+    setHour(i);
+  }
+}
+
+function updateHistoryTheme() {
+  if (!historyChart) return;
+  const t = historyTheme(), o = historyChart.options;
+  o.scales.x.ticks.color = o.scales.y.ticks.color = t.ticks;
+  o.scales.x.border.color = o.scales.y.grid.color = t.grid;
+  Object.assign(o.plugins.tooltip, t.tooltip);
+  for (const ds of historyChart.data.datasets) ds.pointHoverBorderColor = t.ring;
+  historyChart.update("none");
+}
+
+// The chart's table twin: every hourly value, readable without hovering.
+function buildHistoryTable(caps) {
+  const table = $("#history-table");
+  const head = `<thead><tr><th>Hour</th>${Object.values(FUELS).map((f) => `<th class="num">${f.label}</th>`).join("")}</tr></thead>`;
+  const rows = state.gen.hours.map((iso, i) => {
+    const cells = Object.keys(FUELS).map((fuel) => {
+      const share = shareAt(fuel, caps, i);
+      const mw = state.gen.totals[fuel]?.[i];
+      return `<td class="num">${share == null ? "–" : `${fmt(share)}% · ${fmt(Math.max(mw, 0) / 1000, 1)}`}</td>`;
+    }).join("");
+    const when = hourLabel(iso, { weekday: "short", hour: "numeric" });
+    return `<tr><td>${when}${state.partialHours[i] ? " *" : ""}</td>${cells}</tr>`;
+  }).reverse().join("");
+  table.innerHTML = `${head}<tbody>${rows}</tbody>`;
+}
+
+// --- Plant table: sortable, filtered by country and name ----------------------------
+
+const SORT_KEYS = {
+  name: (r) => r.p.name.toLowerCase(),
+  fuel: (r) => r.p.fuel,
+  mw: (r) => r.mw ?? -1,
+  cap: (r) => r.p.cap,
+  pct: (r) => r.pct ?? -1,
+};
+const TABLE_ROWS = 50;
+
+function setupTable() {
+  for (const button of document.querySelectorAll("#top th button")) {
+    button.addEventListener("click", () => {
+      const key = button.dataset.sort;
+      const t = state.table;
+      // Numbers start high-to-low, names A-to-Z; a second click reverses.
+      t.dir = t.sort === key ? (t.dir === "asc" ? "desc" : "asc") : (key === "name" || key === "fuel" ? "asc" : "desc");
+      t.sort = key;
+      renderTop();
+    });
+  }
+  for (const button of document.querySelectorAll(".segmented button")) {
+    button.addEventListener("click", () => {
+      state.table.country = button.dataset.country;
+      for (const b of document.querySelectorAll(".segmented button")) b.setAttribute("aria-pressed", String(b === button));
+      renderTop();
+    });
+  }
+  $("#plant-search").addEventListener("input", (e) => {
+    state.table.query = e.target.value;
+    renderTop();
+  });
 }
 
 function renderTop() {
+  const t = state.table;
+  const query = t.query.trim().toLowerCase();
+  let rows = state.plants.features
+    .map((f) => {
+      const p = f.properties;
+      const mw = mwFor(p.id);
+      return { p, mw, pct: mw == null ? null : (100 * Math.max(mw, 0)) / p.cap };
+    })
+    .filter((r) => state.visible.has(r.p.fuel)
+      && (t.country === "all" || (r.p.country ?? "US") === t.country)
+      && (!query || r.p.name.toLowerCase().includes(query))
+      && (!state.gen || r.mw != null));
+  const key = SORT_KEYS[t.sort];
+  rows.sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    return (x < y ? -1 : x > y ? 1 : 0) * (t.dir === "asc" ? 1 : -1);
+  });
+  const total = rows.length;
+  rows = rows.slice(0, TABLE_ROWS);
+
   const tbody = $("#top tbody");
-  const rows = state.plants.features
-    .map((f) => ({ p: f.properties, mw: mwFor(f.properties.id) }))
-    .filter((r) => state.visible.has(r.p.fuel) && (state.gen ? r.mw != null : true))
-    .sort((a, b) => (state.gen ? b.mw - a.mw : b.p.cap - a.p.cap))
-    .slice(0, 30);
-  tbody.innerHTML = rows.map(({ p, mw }) => `
-    <tr data-id="${p.id}">
-      <td title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
-      <td><span class="tag" style="background:${FUELS[p.fuel].color}">${FUELS[p.fuel].short}</span></td>
-      <td class="num">${mw == null ? "–" : fmt(mw)}</td>
-      <td class="num">${fmt(p.cap)}</td>
-    </tr>`).join("");
-  for (const tr of tbody.querySelectorAll("tr")) tr.addEventListener("click", () => flyTo(tr.dataset.id));
+  tbody.replaceChildren(...rows.map(({ p, mw, pct }) => {
+    const tr = document.createElement("tr");
+    tr.dataset.id = p.id;
+    tr.tabIndex = 0;
+    const name = document.createElement("td");
+    name.textContent = p.name; // names come from outside data: never innerHTML
+    name.title = p.name;
+    const fuel = document.createElement("td");
+    fuel.innerHTML = `<span class="fuel-key"><span class="swatch" style="background:${FUELS[p.fuel].color}"></span>${FUELS[p.fuel].short}</span>`;
+    const num = (v, digits = 0) => {
+      const td = document.createElement("td");
+      td.className = "num";
+      td.textContent = v == null ? "–" : fmt(v, digits);
+      return td;
+    };
+    tr.append(name, fuel, num(mw == null ? null : Math.max(mw, 0)), num(p.cap), num(pct));
+    tr.addEventListener("click", () => flyTo(p.id));
+    tr.addEventListener("keydown", (e) => e.key === "Enter" && flyTo(p.id));
+    return tr;
+  }));
+  for (const th of document.querySelectorAll("#top th")) {
+    const active = th.querySelector("button")?.dataset.sort === t.sort;
+    active ? th.setAttribute("aria-sort", t.dir === "asc" ? "ascending" : "descending") : th.removeAttribute("aria-sort");
+  }
+  $("#top-count").textContent = total > TABLE_ROWS
+    ? `Showing the top ${TABLE_ROWS} of ${fmt(total)} plants. Click a row to find it on the map.`
+    : `${fmt(total)} plants. Click a row to find it on the map.`;
 }
 
 function renderSources() {
@@ -603,7 +880,7 @@ function showPopup(id) {
     .setHTML(`
       <div class="popup">
         <h3>${escapeHtml(p.name)}</h3>
-        <span class="tag" style="background:${FUELS[p.fuel].color}">${p.fuel}</span>
+        <span class="fuel-key"><span class="swatch" style="background:${FUELS[p.fuel].color}"></span>${FUELS[p.fuel].label}</span>
         <dl>
           <dt>Est. output</dt><dd>${mw == null ? "no data" : `${fmt(mw, mw < 10 ? 1 : 0)} MW`}</dd>
           <dt>Capacity</dt><dd>${fmt(p.cap, 1)} MW</dd>
@@ -615,6 +892,9 @@ function showPopup(id) {
           <dt>Since</dt><dd>${p.op_year ?? "–"}</dd>
         </dl>
         <div class="note">${popupNote(p, mw, weighted)}</div>
+        ${p.fuel === "wind" && weather.frames ? `<div class="popup-rose">${roseSvg(...f.geometry.coordinates, 112)}
+          <div class="note">Wind at 100 m over these 48 hours; the needle is the selected hour
+          (${windNowText(...f.geometry.coordinates)}).</div></div>` : ""}
       </div>`)
     .addTo(map);
 }

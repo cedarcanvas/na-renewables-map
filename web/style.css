@@ -9,6 +9,8 @@
   --hover: #f6f7f9;
   --notice-bg: #fff7e6;
   --notice-line: #f5d38a;
+  --status-good: #2f8f46;
+  --status-warn: #b26b00;
   color-scheme: light;
 }
 
@@ -25,6 +27,8 @@
     --hover: #1f2732;
     --notice-bg: #2a2414;
     --notice-line: #6b5a2b;
+    --status-good: #5cc27a;
+    --status-warn: #e0a347;
     color-scheme: dark;
   }
 }
@@ -39,6 +43,8 @@
   --hover: #1f2732;
   --notice-bg: #2a2414;
   --notice-line: #6b5a2b;
+  --status-good: #5cc27a;
+  --status-warn: #e0a347;
   color-scheme: dark;
 }
 
@@ -98,8 +104,6 @@ th { text-align: left; font-weight: 600; font-size: 11px; color: var(--muted); t
 th, td { padding: 5px 4px; border-bottom: 1px solid var(--line); }
 .num { text-align: right; }
 
-#totals td:first-child { width: 22px; }
-#totals input { margin: 0; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
 
 #top { table-layout: fixed; }
@@ -110,16 +114,6 @@ th, td { padding: 5px 4px; border-bottom: 1px solid var(--line); }
 #top tbody tr:hover { background: var(--hover); }
 #top td:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.tag {
-  display: inline-block;
-  padding: 0 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  color: #fff;
-}
 
 .layers { margin-top: 10px; }
 .layers label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin-right: 14px; }
@@ -172,3 +166,90 @@ footer a { color: inherit; }
 
 /* Wind particles sit above the map but never take its clicks. */
 #wind-canvas { position: absolute; inset: 0; pointer-events: none; }
+
+/* --- Dashboard panel ---------------------------------------------------------- */
+.card {
+  margin-top: 16px;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+#time.card { margin-top: 14px; }
+.card h2, section > h2 { margin: 0 0 8px; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.note { margin: 6px 0 0; }
+
+/* Feed status: icon + label, never colour alone. */
+.chips { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 0; padding: 0; }
+.chips li {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px;
+  font-size: 11px; color: var(--muted); white-space: nowrap;
+}
+.chips li .icon { font-size: 9px; }
+.chips li.ok .icon { color: var(--status-good); }
+.chips li.behind .icon { color: var(--status-warn); }
+.chips li.ok { color: var(--text); }
+
+/* Stat tiles, one per fuel; the tile is also the fuel's map toggle. */
+.kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.kpi {
+  --fuel: #888;
+  display: block; width: 100%; text-align: left; font: inherit; color: var(--text);
+  padding: 10px 10px 9px; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--surface); cursor: pointer;
+}
+.kpi:hover { background: var(--hover); }
+.kpi[aria-pressed="false"] { opacity: 0.45; }
+.kpi:focus-visible, .data-table th button:focus-visible, .segmented button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.kpi-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.kpi-label .swatch { margin: 0; }
+.kpi-value { font-size: 24px; font-weight: 650; line-height: 1.15; margin-top: 4px; }
+.kpi-value small { font-size: 13px; font-weight: 500; color: var(--muted); }
+.kpi-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+/* Meter: the fuel's colour on a lighter step of the same hue. */
+.meter { height: 6px; border-radius: 3px; margin-top: 7px; overflow: hidden;
+  background: color-mix(in oklab, var(--fuel) 18%, var(--surface)); }
+.meter span { display: block; height: 100%; border-radius: 3px; background: var(--fuel); }
+.partial-tag { font-size: 10.5px; font-weight: 600; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 4px; padding: 0 4px; margin-left: auto; }
+
+/* Chart */
+.legend { list-style: none; display: flex; flex-wrap: wrap; gap: 10px; margin: 0; padding: 0; font-size: 11.5px; color: var(--muted); }
+.legend li { display: inline-flex; align-items: center; gap: 5px; }
+.legend .key { width: 14px; height: 2px; border-radius: 1px; background: var(--fuel); }
+.chart-box { position: relative; height: 170px; margin-top: 6px; cursor: crosshair; }
+.table-view { margin-top: 8px; font-size: 12px; }
+.table-view summary { cursor: pointer; color: var(--muted); }
+.table-view .scroll { max-height: 220px; overflow: auto; margin-top: 6px; }
+
+/* Filter row and sortable table */
+.filter-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex: none; }
+.segmented button { border: 0; border-radius: 0; padding: 4px 9px; font-size: 12px; background: var(--surface); }
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button[aria-pressed="true"] { background: var(--hover); font-weight: 650; }
+#plant-search {
+  flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 5px 8px; color: var(--text);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+}
+.data-table th button {
+  all: unset; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
+}
+.data-table th[aria-sort] button { color: var(--text); }
+.data-table th[aria-sort="descending"] button::after { content: " ▼"; font-size: 9px; }
+.data-table th[aria-sort="ascending"] button::after { content: " ▲"; font-size: 9px; }
+.fuel-key { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+.fuel-key .swatch { margin: 0; width: 8px; height: 8px; }
+
+/* Wind roses: drawn over the map but never in the way of its clicks. */
+.wind-rose { pointer-events: none; opacity: 0.92; line-height: 0; }
+.rose-legend { margin: 6px 0 0; width: 100%; }
+.rose-key { display: inline-flex; align-items: center; gap: 3px; margin: 0 4px; white-space: nowrap; }
+.rose-key .swatch { margin: 0; width: 9px; height: 9px; }
+.popup-rose { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.popup-rose .note { margin: 0; }
+.layers { display: flex; flex-wrap: wrap; row-gap: 4px; }
