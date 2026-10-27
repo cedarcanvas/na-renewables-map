@@ -35,8 +35,33 @@ OVERRIDES = {
     "COL1": ["Coaldale Solar"],
     "NMK1": ["East Strathmore Solar Project"],
     "MCH1": ["Michichi Creek Solar Farm"],
+    # Elemental's two Brooks farms: the 15 MW original, then Brooks Solar II (28 MW), which
+    # AESO reports as two assets ("Brooks Solar 1" and "2": 13 + 14 MW).
     "BSC1": ["Brooks Solar 1"],
-    "BRK2": ["Brooks Solar 1"],          # likely: no separate Brooks 2 in OSM; same site area
+    "BRK1": ["Brooks Solar II Project"],
+    "BRK2": ["Brooks Solar II Project"],
+    # Two assets named for Burdett: BluEarth's 20 MW farm, and the 11 MW one beside it,
+    # which OSM calls Alberta Solar One (10.5 MW, Enbridge and Morgan Solar).
+    "BUR1": ["Burdett Solar"],
+    "BRD1": ["Alberta Solar One"],       # likely
+    "ICP1": ["St. Mary River"],          # likely: Irrican Power's 7 MW hydro plant on the St. Mary canal
+    # Solar assets named for their substations (OSM or the Global Energy Monitor wiki for the
+    # farms; codes as on Wikipedia's list of Canadian PV stations and dispatcho.app).
+    "ACD1": ["Big Sky Solar"],           # Acadia Valley
+    "CRD1": ["Wrentham Solar Project"],  # Conrad substation; the two phases, 23 + 18 MW
+    "CRD2": ["Wrentham Solar Project"],
+    "FCS1": ["Fox Coulee Solar"],
+    "HUL1": ["Prairie Sunlight II Solar"],
+    "VXH1": ["Prairie Sunlight III Solar"],
+    "DUS1": ["Duchess Solar"],
+    "GLE1": ["Gleichen Solar"],
+    "JFS1": ["Joffre Solar"],
+    "JFS2": ["Joffre Solar"],
+    "KIL1": ["Killarney Lake Solar"],
+    "CLD1": ["Lethbridge Solar"],
+    "SDL1": ["Saddlebrook Solar"],
+    "SGC1": ["Spring Coulee Solar"],
+    "YNG1": ["Youngstown Solar"],
     "TAB1": ["Taber Wind Farm"],
     "SCR2": ["Magrath"],
     "SCR3": ["Chin Chute"],

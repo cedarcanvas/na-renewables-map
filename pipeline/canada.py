@@ -38,14 +38,29 @@ ABBREV = {abbr: name for name, (abbr, _) in PROVINCES.items()}
 # Wind projects whose phases IESO reports separately: name -> {commissioning year: phase name}.
 WIND_PHASES = {"Grand Valley": {2012: "Grand Valley 1 & 2", 2015: "Grand Valley 3"}}
 
-# Ontario solar farms newer than the 2017 NACEI layer that IESO reports, so their readings
-# have a plant to land on. Locations: OpenStreetMap (ODbL), Global Energy Monitor.
+# Solar farms that IESO or AESO report but neither NACEI (2017) nor OpenStreetMap has, so
+# their readings have a plant to land on. Capacities are the grid operator's (MW AC).
+# Locations: OpenStreetMap (ODbL) and the Global Energy Monitor wiki (gem.wiki) unless noted.
+# One is skipped if a mapped plant of the same fuel turns up within ~3 km of it.
+_solar = lambda name, province, cap, lat, lon, year: {
+    "name": name, "fuel": "solar", "cap": cap, "province": province, "lat": lat, "lon": lon, "op_year": year}
 EXTRA_PLANTS = [
-    {"name": "Loyalist Solar", "fuel": "solar", "cap": 54.0, "province": "Ontario",
-     "lat": 44.3386, "lon": -76.9761, "op_year": 2019},   # OSM way 1081537364
-    {"name": "Nanticoke Solar", "fuel": "solar", "cap": 44.0, "province": "Ontario",
-     "lat": 42.8001, "lon": -80.0503, "op_year": 2019},   # former Nanticoke coal station
+    _solar("Loyalist Solar", "Ontario", 54, 44.3386, -76.9761, 2019),     # OSM way 1081537364
+    _solar("Nanticoke Solar", "Ontario", 44, 42.8001, -80.0503, 2019),    # former Nanticoke coal station
+    _solar("Big Sky Solar", "Alberta", 140, 51.18, -110.26, 2025),
+    _solar("Joffre Solar", "Alberta", 47, 52.30, -113.57, 2023),          # two phases, 25 + 22 MW
+    _solar("Saddlebrook Solar", "Alberta", 81, 50.652, -113.875, 2024),   # unnamed OSM polygons, Aldersyde
+    _solar("Spring Coulee Solar", "Alberta", 30, 49.29, -113.16, 2024),
+    _solar("Lethbridge Solar", "Alberta", 9, 49.716, -112.910, 2024),     # unnamed OSM polygon
+    _solar("Youngstown Solar", "Alberta", 6, 51.51, -111.19, 2023),
+    _solar("Killarney Lake Solar", "Alberta", 22, 52.58, -110.30, 2025),  # approximate
+    _solar("Duchess Solar", "Alberta", 20, 50.73, -111.91, 2025),         # approximate, ±4 km
+    _solar("Gleichen Solar", "Alberta", 14, 50.91, -113.05, 2025),        # approximate: ~5 km N of Gleichen
 ]
+# OpenStreetMap farms whose tags disagree with the grid operator: name -> corrections.
+OSM_FIXES = {
+    "Drumheller Solar Farm": {"name": "Fox Coulee Solar", "cap": 80.0},   # Neoen; OSM's 96 is MW DC
+}
 
 
 def _query(layer_url, where):
@@ -152,7 +167,7 @@ def osm_solar(province_code="CA-AB"):
             "cap": _mw(tags.get("plant:output:electricity")), "province": ABBREV[province_code[-2:]],
             "lat": centre.get("lat"), "lon": centre.get("lon"), "units": 1,
             "op_year": float("nan"), "hub_m": float("nan"),
-        })
+        } | OSM_FIXES.get(tags.get("name"), {}))
     return pd.DataFrame(rows)
 
 
@@ -161,9 +176,14 @@ def plants():
     nacei = hydro_solar_plants()
     # Alberta's solar comes from OpenStreetMap instead of the 2017 layer.
     nacei = nacei[~((nacei["province"] == "Alberta") & (nacei["fuel"] == "solar"))]
-    extra = pd.DataFrame(EXTRA_PLANTS).assign(units=1, hub_m=float("nan"))
-    df = pd.concat([wind_projects(), nacei, osm_solar("CA-AB"), extra], ignore_index=True)
+    df = pd.concat([wind_projects(), nacei, osm_solar("CA-AB")], ignore_index=True)
     df = df[df["province"].isin(PROVINCES) & df["lat"].notna() & df["lon"].notna() & (df["cap"] > 0)]
+    extra = pd.DataFrame(EXTRA_PLANTS).assign(units=1, hub_m=float("nan"))
+    near = [((df["fuel"] == e.fuel) & ((df["lat"] - e.lat).abs() < 0.03) & ((df["lon"] - e.lon).abs() < 0.04)).any()
+            for e in extra.itertuples()]
+    if any(near):
+        print(f"  Skipping hand-added plants now mapped nearby: {', '.join(extra['name'][near])}")
+    df = pd.concat([df, extra[[not n for n in near]]], ignore_index=True)
     features = []
     for p in df.itertuples():
         abbr, ba = PROVINCES[p.province]

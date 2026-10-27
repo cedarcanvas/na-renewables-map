@@ -19,6 +19,7 @@ Open-Meteo data is CC BY 4.0; the free API is for non-commercial use.
 
 import json
 import math
+import os
 import time
 
 import numpy as np
@@ -136,14 +137,29 @@ def fetch(cells, start, end):
 
 
 def cached(cells, hours):
-    """The cached weather if it's recent and covers these cells and hours, else None."""
+    """The cached weather if it's recent and covers these hours, else None. Cells it lacks
+    (plants added since it was fetched) are fetched on their own and added, rather than
+    refetching every cell."""
     if not WEATHER_CSV.exists():
         return None
-    if time.time() - WEATHER_CSV.stat().st_mtime > WEATHER_MAX_AGE_HOURS * 3600:
+    fetched_at = WEATHER_CSV.stat().st_mtime
+    if time.time() - fetched_at > WEATHER_MAX_AGE_HOURS * 3600:
         return None
     df = pd.read_csv(WEATHER_CSV, parse_dates=["utc"])
-    if not set(cells) <= set(df["cell"]) or not set(hours) <= set(df["utc"]):
+    if not set(hours) <= set(df["utc"]):
         return None
+    missing = sorted(set(cells) - set(df["cell"]))
+    if missing:
+        first, last = df["utc"].min(), df["utc"].max()
+        try:
+            new = fetch(missing, first - pd.Timedelta(hours=1), last)
+        except Exception as e:  # over the day's calls, or Open-Meteo down: those plants get their region's average
+            print(f"Weather: {len(missing)} new cells not fetched ({e})")
+            return df
+        df = pd.concat([df, new[(new["utc"] >= first) & (new["utc"] <= last)]], ignore_index=True)
+        df.to_csv(WEATHER_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
+        os.utime(WEATHER_CSV, (fetched_at, fetched_at))  # the rest is no fresher than it was
+        print(f"Weather: added {len(missing)} new cells to {WEATHER_CSV.name}")
     return df
 
 

@@ -116,7 +116,7 @@ days), so its scores firm up over the month.
 | Canadian hydro and solar plants | NACEI renewable plants ≥ 1 MW (2017; thin for newer solar), plus Ontario's Loyalist and Nanticoke solar farms (`EXTRA_PLANTS` in `canada.py`) | monthly with plants |
 | Ontario output per generator | IESO Generator Output and Capability report, via gridstatus; codes matched to plants in `pipeline/ontario.py` | hourly |
 | Alberta output per asset | AESO [Current Supply Demand](http://ets.aeso.ca/ets_web/ip/Market/Reports/CSDReportServlet), read each run; assets matched to plants in `pipeline/alberta.py` | snapshot per run |
-| Alberta solar farm locations | [OpenStreetMap](https://www.openstreetmap.org/copyright) via Overpass (ODbL) | monthly with plants |
+| Alberta solar farm locations | [OpenStreetMap](https://www.openstreetmap.org/copyright) via Overpass (ODbL; the last answer is kept in case Overpass is busy), plus farms AESO reports that OSM lacks, located from the [Global Energy Monitor wiki](https://www.gem.wiki/) (`EXTRA_PLANTS` in `canada.py`) | monthly with plants |
 | Nova Scotia wind, Maritime Link | NS Power [OASIS current report](https://resourcesprd-nspower.aws.silvertech.net/oasis/current_report.shtml) | snapshot per run (2-minute averages) |
 | New Brunswick interchange | NB Power [system information](https://tso.nbpower.com/Public/en/SystemInformation_realtime.asp) (scheduled, not metered) | snapshot per run |
 | Saskatchewan wind, hydro, solar | SaskPower dashboard API | in practice a previous-day summary |
@@ -186,7 +186,7 @@ once EIA publishes hours the history covers.
 - `pipeline/snapshots.py`, `pipeline/alberta.py`: AESO, NS Power, NB Power and SaskPower readings kept as hourly history; AESO assets matched to plants
 - `pipeline/live.py`: the ISOs' (and BPA's) fuel mix for yesterday and today → `data/live_generation.csv`, averaged into end-of-hour MW (about 2 minutes, mostly SPP)
 - `pipeline/generation.py`: EIA-930, plus calibrated live ISO hours after EIA ends → `data/ba_generation.csv`, the last 48 hours by region and fuel
-- `pipeline/weather.py`: Open-Meteo → `data/weather.csv`, hourly wind at ~100 m for each 0.1° cell with wind farms and sunshine for each 0.5° cell with solar farms (~2,700 locations, about 6 minutes). The free tier allows 10,000 calls a day, so it refreshes every 8 hours; `data/weather_calls.json` logs each day's calls, and a fetch that would go over is skipped (the last weather is reused)
+- `pipeline/weather.py`: Open-Meteo → `data/weather.csv`, hourly wind at ~100 m for each 0.1° cell with wind farms and sunshine for each 0.5° cell with solar farms (~2,700 locations, about 6 minutes). The free tier allows 10,000 calls a day, so it refreshes every 8 hours; `data/weather_calls.json` logs each day's calls, and a fetch that would go over is skipped (the last weather is reused). Plants added between refreshes get just their own cells fetched
 - `pipeline/curves.py`: turns local weather into each plant's expected capacity factor
 - `pipeline/allocate.py`: splits each region's hourly total among its plants, weighted by those capacity factors → `web/data/generation.json`
 - `pipeline/gfs.py`: NOAA GFS → `web/data/weather/` (all hours' wind in one `wind.png`, a Web Mercator cloud PNG per hour, `meta.json`); GDAL reads and reprojects the GRIB files
