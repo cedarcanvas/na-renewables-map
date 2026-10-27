@@ -245,11 +245,28 @@ footer a { color: inherit; }
 .fuel-key { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
 .fuel-key .swatch { margin: 0; width: 8px; height: 8px; }
 
-/* Wind roses: drawn over the map but never in the way of its clicks. */
-.wind-rose { pointer-events: none; opacity: 0.92; line-height: 0; }
-.rose-legend { margin: 6px 0 0; width: 100%; }
+/* Wind roses and sun arcs: drawn over the map but never in the way of its clicks. */
+.site-glyph { pointer-events: none; opacity: 0.92; line-height: 0; }
 .rose-key { display: inline-flex; align-items: center; gap: 3px; margin: 0 4px; white-space: nowrap; }
 .rose-key .swatch { margin: 0; width: 9px; height: 9px; }
-.popup-rose { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
-.popup-rose .note { margin: 0; }
+/* The panel's key to the roses and arcs. */
+/* Sample and summary side by side, the details full width below. */
+.key-item {
+  display: grid; grid-template-columns: auto 1fr; grid-template-areas: "sample head" "list list";
+  gap: 6px 10px; align-items: center; margin-top: 10px;
+}
+.key-item + .key-item { border-top: 1px solid var(--line); padding-top: 10px; }
+.key-sample { grid-area: sample; display: block; }
+.key-head { grid-area: head; }
+.key-head h3 { margin: 0 0 4px; font-size: 12px; }
+.key-head p { margin: 0; color: var(--muted); }
+.key-list { grid-area: list; margin: 0; padding-left: 16px; }
+.key-list li { margin: 0 0 4px; }
+.key-list .rose-key { margin: 0 6px 0 0; }
+.sun-chart { margin-top: 8px; }
+.sun-chart-key { display: flex; gap: 4px; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.sun-chart-key .rose-key { margin: 0 8px 0 0; }
+.sun-chart-key .dash { width: 12px; border-top: 1.5px dashed; }
+.sun-chart-plot { display: block; touch-action: none; }
+.sun-chart .note { max-width: none; font-variant-numeric: tabular-nums; }
 .layers { display: flex; flex-wrap: wrap; row-gap: 4px; }

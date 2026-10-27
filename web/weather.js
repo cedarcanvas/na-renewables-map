@@ -26,10 +26,9 @@ async function addWeatherLayers() {
   weather.particles = new WindParticles(map);
   $("#show-wind").closest("label").hidden = false;
   $("#show-wind").addEventListener("change", (e) => weather.particles.setVisible(e.target.checked));
-  weather.roses = new WindRoses(map);
+  weather.roses = new SiteGlyphs(map, { fuel: "wind", draw: roseSvg });
   $("#show-roses").closest("label").hidden = false;
   $("#show-roses").addEventListener("change", (e) => weather.roses.setVisible(e.target.checked));
-  renderRoseLegend();
   $("#sources").insertAdjacentHTML("beforeend",
     ` Wind and clouds: <a href="https://www.nco.ncep.noaa.gov/pmb/products/gfs/">NOAA GFS</a> (public domain).`);
   updateWeather();
@@ -68,6 +67,7 @@ function weatherFrame() {
 
 // Called by setHour in app.js.
 function updateWeather() {
+  weather.sunArcs?.render(); // sun.js; needs no GFS data
   if (!weather.meta) return;
   const f = weatherFrame();
   weather.particles?.setField(f >= 0 ? weather.frames[f] : null);
@@ -226,8 +226,8 @@ class WindParticles {
 }
 
 // --- Wind roses ---------------------------------------------------------------------
-// For a point: how often the 100 m wind blew from each of 16 directions over the
-// slider's 48 hours, each petal stacked by speed class, with a needle for the
+// For a region's wind farms: how often the 100 m wind blew from each of 16 directions
+// over the slider's 48 hours, each petal stacked by speed class, with a needle for the
 // selected hour. Petals point where the wind came FROM (the meteorological way).
 
 const ROSE_SECTORS = 16;
@@ -253,24 +253,33 @@ function sampleWind(frame, lng, lat) {
 // Direction the wind blows FROM, in degrees clockwise from north.
 const fromDirection = (u, v) => (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360;
 
-function roseCounts(lng, lat) {
+// Hours from each direction and speed class at a region's farms, each farm's hours
+// weighted by its capacity, so the rose is the wind its turbines met.
+function roseCounts(plants) {
   const counts = Array.from({ length: ROSE_SECTORS }, () => [0, 0, 0, 0]);
-  let hours = 0;
+  let total = 0;
   for (const frame of weather.frames) {
-    const wind = sampleWind(frame, lng, lat);
-    if (!wind) continue;
-    const speed = Math.hypot(...wind);
-    const sector = Math.round(fromDirection(...wind) / (360 / ROSE_SECTORS)) % ROSE_SECTORS;
-    counts[sector][ROSE_SPEEDS.filter((b) => speed >= b).length]++;
-    hours++;
+    for (const f of plants) {
+      const wind = sampleWind(frame, ...f.geometry.coordinates);
+      if (!wind) continue;
+      const speed = Math.hypot(...wind);
+      const sector = Math.round(fromDirection(...wind) / (360 / ROSE_SECTORS)) % ROSE_SECTORS;
+      counts[sector][ROSE_SPEEDS.filter((b) => speed >= b).length] += f.properties.cap;
+      total += f.properties.cap;
+    }
   }
-  return { counts, hours };
+  return { counts, total };
 }
 
-// An SVG string: grid rings and spokes, stacked petals, and the selected hour's needle.
-function roseSvg(lng, lat, size) {
-  const { counts, hours } = roseCounts(lng, lat);
-  if (!hours) return "";
+function roseSvg(site, size) {
+  const { counts, total } = roseCounts(site.plants);
+  if (!total) return "";
+  const now = weatherFrame() >= 0 ? sampleWind(weather.frames[weatherFrame()], site.lng, site.lat) : null;
+  return drawRose(counts, now && fromDirection(...now), size);
+}
+
+// An SVG string: grid rings and spokes, stacked petals, and a needle (degrees, or null).
+function drawRose(counts, needle, size) {
   const ramp = ROSE_RAMPS[resolvedTheme()];
   const grid = cssVar("--line"), ink = cssVar("--text"), surface = cssVar("--bg");
   const c = size / 2, R = c - 2;
@@ -302,40 +311,73 @@ function roseSvg(lng, lat, size) {
       r0 = r1;
     });
   });
-  const now = weatherFrame() >= 0 ? sampleWind(weather.frames[weatherFrame()], lng, lat) : null;
-  if (now) {
-    const [x, y] = point(fromDirection(...now), R);
+  if (needle != null) {
+    const [x, y] = point(needle, R);
     svg += `<line x1="${c}" y1="${c}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${ink}" stroke-width="2" stroke-linecap="round"/>`;
   }
   svg += `<circle cx="${c}" cy="${c}" r="3" fill="${ink}" stroke="${surface}" stroke-width="2"/></svg>`;
   return svg;
 }
 
-// Words for the popup: the selected hour's wind at a point.
-function windNowText(lng, lat) {
-  const f = weatherFrame();
-  const wind = f >= 0 ? sampleWind(weather.frames[f], lng, lat) : null;
-  if (!wind) return "";
-  const names = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
-  const deg = fromDirection(...wind);
-  return `${Math.hypot(...wind).toFixed(1)} m/s from the ${names[Math.round(deg / 22.5) % 16]}`;
+// Swatches for a light→dark ramp, in the current theme's steps.
+function rampKeyHtml(ramps, labels) {
+  const ramp = ramps[resolvedTheme()];
+  return labels.map((label, k) =>
+    `<span class="rose-key"><span class="swatch" style="background:${ramp[k]}"></span>${label}</span>`).join("");
 }
 
-function renderRoseLegend() {
-  $("#rose-legend").innerHTML = `Roses: how often the wind at 100 m blew from each direction over these
-    48 hours, shaded by speed ${roseKeyHtml()}; the needle is the selected hour.`;
+// --- The key ------------------------------------------------------------------------
+// A card in the side panel with a sample and an explanation for each glyph layer that's
+// on. The samples are made-up weather drawn by the same code as the map's glyphs.
+
+// 48 hours by direction (N, NNE, … NNW) and speed class: mostly southerly, a few
+// strong northwesterlies.
+const KEY_ROSE = [
+  [2, 1, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [1, 0, 0, 0], [1, 1, 0, 0], [1, 2, 1, 0], [1, 3, 3, 1],
+  [1, 3, 4, 2], [1, 2, 3, 1], [1, 1, 1, 0], [0, 1, 0, 0], [0, 0, 0, 0], [0, 1, 1, 0], [0, 1, 2, 1], [0, 1, 1, 0],
+];
+const KEY_SIZE = 92;
+
+// A sample glyph with compass letters around it.
+function keySample(glyph) {
+  const pad = 12, W = KEY_SIZE + 2 * pad, muted = cssVar("--muted");
+  const letter = (x, y, s) => `<text x="${x}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="10" fill="${muted}">${s}</text>`;
+  return `<svg class="key-sample" width="${W}" height="${W}" viewBox="0 0 ${W} ${W}" aria-hidden="true">
+    <g transform="translate(${pad},${pad})">${glyph}</g>
+    ${letter(W / 2, pad / 2, "N")}${letter(W - pad / 2, W / 2, "E")}${letter(W / 2, W - pad / 2, "S")}${letter(pad / 2, W / 2, "W")}</svg>`;
 }
 
 function roseKeyHtml() {
-  const ramp = ROSE_RAMPS[resolvedTheme()];
-  return ROSE_SPEED_LABELS.map((label, k) =>
-    `<span class="rose-key"><span class="swatch" style="background:${ramp[k]}"></span>${label}</span>`).join("") + " m/s";
+  return `${keySample(drawRose(KEY_ROSE, 170, KEY_SIZE))}
+    <div class="key-head">
+      <h3>Wind roses</h3>
+      <p>Where the wind at 100 m came from over these 48 hours, and how hard it blew.</p>
+    </div>
+    <ul class="key-list">
+      <li>Petals point where the wind blew <em>from</em>; longer petals mean more of the hours.</li>
+      <li>Shade is speed: ${rampKeyHtml(ROSE_RAMPS, ROSE_SPEED_LABELS)} m/s</li>
+      <li>The needle is the selected hour's wind.</li>
+    </ul>`;
 }
 
-// Roses on the map: one per cluster of wind farms, or per large farm when zoomed in.
-class WindRoses {
-  constructor(map) {
-    this.map = map;
+function updateGlyphKey() {
+  const items = [["#key-roses", weather.roses, roseKeyHtml], ["#key-sun", weather.sunArcs, sunKeyHtml]];
+  let any = false;
+  for (const [id, layer, html] of items) {
+    const on = Boolean(layer?.visible);
+    $(id).hidden = !on;
+    if (on) $(id).innerHTML = html();
+    any ||= on;
+  }
+  $("#glyph-key").hidden = !any;
+}
+
+// Glyphs on the map for one fuel (wind roses, sun arcs). Each stands for a region, not a
+// plant: all of the fuel's plants in a grid cell (5° zoomed out, 3° zoomed in), drawn at
+// their capacity-weighted centre, biggest regions first and never overlapping.
+class SiteGlyphs {
+  constructor(map, { fuel, draw }) {
+    Object.assign(this, { map, fuel, draw });
     this.markers = [];
     this.visible = false;
     map.on("moveend", () => this.render());
@@ -343,53 +385,47 @@ class WindRoses {
 
   setVisible(on) {
     this.visible = on;
-    $("#rose-legend").hidden = !on;
+    updateGlyphKey();
     this.render();
   }
 
+  // Each site is { lng, lat, cap, plants }.
   sites() {
-    const zoom = this.map.getZoom();
-    const farms = state.plants.features.filter((f) => f.properties.fuel === "wind");
-    let sites;
-    if (zoom >= 6.5) {
-      sites = farms.filter((f) => f.properties.cap >= 100)
-        .map((f) => ({ lng: f.geometry.coordinates[0], lat: f.geometry.coordinates[1], cap: f.properties.cap }));
-    } else {
-      // Capacity-weighted centres of wind in grid cells; bigger cells when zoomed out.
-      const cell = zoom < 4.5 ? 5 : 3;
-      const cells = new Map();
-      for (const f of farms) {
-        const [lng, lat] = f.geometry.coordinates;
-        const key = `${Math.floor(lng / cell)},${Math.floor(lat / cell)}`;
-        const c = cells.get(key) ?? { lng: 0, lat: 0, cap: 0 };
-        c.lng += lng * f.properties.cap;
-        c.lat += lat * f.properties.cap;
-        c.cap += f.properties.cap;
-        cells.set(key, c);
-      }
-      sites = [...cells.values()].filter((c) => c.cap >= 1500)
-        .map((c) => ({ lng: c.lng / c.cap, lat: c.lat / c.cap, cap: c.cap }));
+    const cell = this.map.getZoom() < 4.5 ? 5 : 3;
+    const cells = new Map();
+    for (const f of state.plants.features) {
+      if (f.properties.fuel !== this.fuel) continue;
+      const [lng, lat] = f.geometry.coordinates;
+      const key = `${Math.floor(lng / cell)},${Math.floor(lat / cell)}`;
+      const c = cells.get(key) ?? { lng: 0, lat: 0, cap: 0, plants: [] };
+      c.lng += lng * f.properties.cap;
+      c.lat += lat * f.properties.cap;
+      c.cap += f.properties.cap;
+      c.plants.push(f);
+      cells.set(key, c);
     }
-    return sites.sort((a, b) => b.cap - a.cap);
+    return [...cells.values()].filter((c) => c.cap >= 1500)
+      .map((c) => ({ ...c, lng: c.lng / c.cap, lat: c.lat / c.cap }))
+      .sort((a, b) => b.cap - a.cap);
   }
 
   render() {
     for (const m of this.markers) m.remove();
     this.markers = [];
-    if (!this.visible || !weather.frames) return;
-    const size = this.map.getZoom() >= 6.5 ? 84 : 104;
+    if (!this.visible) return;
+    const size = 104;
     const bounds = this.map.getBounds();
     const placed = [];
     for (const site of this.sites()) {
       if (!bounds.contains([site.lng, site.lat])) continue;
-      // Biggest first; skip a rose that would overlap one already placed.
+      // Biggest first; skip a glyph that would overlap one already placed.
       const p = this.map.project([site.lng, site.lat]);
       if (placed.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < size * 0.9)) continue;
-      const svg = roseSvg(site.lng, site.lat, size);
+      const svg = this.draw(site, size);
       if (!svg) continue;
       placed.push(p);
       const el = document.createElement("div");
-      el.className = "wind-rose";
+      el.className = "site-glyph";
       el.innerHTML = svg;
       this.markers.push(new maplibregl.Marker({ element: el, anchor: "center" }).setLngLat([site.lng, site.lat]).addTo(this.map));
     }

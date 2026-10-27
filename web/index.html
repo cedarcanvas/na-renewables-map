@@ -61,7 +61,15 @@
       <label hidden><input type="checkbox" id="show-wind" checked> Wind at 100 m</label>
       <label hidden><input type="checkbox" id="show-clouds"> Cloud cover</label>
       <label hidden><input type="checkbox" id="show-roses"> Wind roses</label>
-      <p id="rose-legend" class="muted small rose-legend" hidden></p>
+      <label hidden><input type="checkbox" id="show-sun"> Sun arcs</label>
+    </section>
+
+    <section id="glyph-key" class="card small" aria-labelledby="key-title" hidden>
+      <h2 id="key-title">Weather symbols</h2>
+      <p class="muted note">Each symbol sums up a region: all the wind or solar farms within a few
+        degrees, drawn at the capacity-weighted centre of them. They show regional conditions, not any one farm's.</p>
+      <div id="key-roses" class="key-item" hidden></div>
+      <div id="key-sun" class="key-item" hidden></div>
     </section>
 
     <section id="notice" hidden></section>
@@ -104,6 +112,7 @@
   <script src="https://unpkg.com/deck.gl@9.4.0/dist.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
   <script src="weather.js"></script>
+  <script src="sun.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -39,10 +39,19 @@ BC, Manitoba and Newfoundland and Labrador show capacity only.
 canvas over the map for wind particles (`weather.js`, the technique behind
 earth.nullschool and Windy). Layers: plants (outline = capacity, fill = the
 hour's output), grid regions, Québec flows, wind at 100 m, cloud cover, and
-wind roses: 48 hours of GFS wind as 16 sectors stacked by speed, with a needle
-for the selected hour. Zoomed out, one rose stands for each cluster of wind
-capacity; from zoom 6.5 each farm of 100 MW or more gets its own, and every
-wind farm's popup shows one. HIFLD outlines trace utility service territories,
+wind roses and sun arcs. Both are regional symbols, never one plant's: each
+stands for all of a fuel's plants in a 5° grid cell (3° from zoom 4.5) with at
+least 1,500 MW, drawn at their capacity-weighted centre. A wind rose is 48 hours
+of GFS wind at those farms (each farm's hours weighted by its capacity) as 16
+sectors stacked by speed, with a needle for the selected hour. A sun arc
+(`sun.js`) is the sun's path across the sky for each day in the window, drawn at
+its true compass bearing with the newest day outside, each hour shaded by the
+region's Open-Meteo sunshine as a share of a clear sky's. Clear-sky sunshine is
+computed in the browser from the sun's position (NOAA's solar position
+equations, Haurwitz's clear-sky model), averaged over each hour like
+Open-Meteo's figures. A key in the side panel explains both, with samples drawn
+by the same code from made-up weather. Each solar farm's popup charts its 48
+hours of sunshine against that clear sky. HIFLD outlines trace utility service territories,
 so `regions.py` closes gaps under about 10 km, drops islands and holes under
 about 500 km² and simplifies, which takes them from about 5,000 parts to 130.
 The side panel is a small dashboard: a stat tile per fuel (GW now and the share

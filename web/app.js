@@ -120,10 +120,9 @@ function applyThemeColors() {
   paint("clouds", "raster-brightness-max", c.cloudBrightness[1]);
   updateFlows();
   updateHistoryTheme();
-  if (weather.roses) {
-    weather.roses.render();
-    renderRoseLegend();
-  }
+  weather.roses?.render();
+  weather.sunArcs?.render();
+  updateGlyphKey();
 }
 
 async function loadJSON(url) {
@@ -177,6 +176,7 @@ async function init() {
   await addRegionLayers(); // first, so the plant circles draw on top
   addPlantLayers();
   addFlowOverlay();
+  addSunArcs();
   await addWeatherLayers();
 }
 
@@ -875,7 +875,7 @@ function showPopup(id) {
   const weatherRow = local == null ? ""
     : p.fuel === "wind" ? `<dt>Wind at 100 m</dt><dd>${fmt(local, 1)} m/s</dd>`
     : `<dt>Sunshine</dt><dd>${fmt(local)} W/m²</dd>`;
-  new maplibregl.Popup({ maxWidth: "260px" })
+  const popup = new maplibregl.Popup({ maxWidth: "260px" })
     .setLngLat(f.geometry.coordinates)
     .setHTML(`
       <div class="popup">
@@ -892,11 +892,10 @@ function showPopup(id) {
           <dt>Since</dt><dd>${p.op_year ?? "–"}</dd>
         </dl>
         <div class="note">${popupNote(p, mw, weighted)}</div>
-        ${p.fuel === "wind" && weather.frames ? `<div class="popup-rose">${roseSvg(...f.geometry.coordinates, 112)}
-          <div class="note">Wind at 100 m over these 48 hours; the needle is the selected hour
-          (${windNowText(...f.geometry.coordinates)}).</div></div>` : ""}
+        ${p.fuel === "solar" ? sunChartHtml(f) : ""}
       </div>`)
     .addTo(map);
+  if (p.fuel === "solar") wireSunChart(popup.getElement(), f);
 }
 
 // The ISOs and BPA post every 5 minutes; Hydro-Québec and IESO post hourly figures;
