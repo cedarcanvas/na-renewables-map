@@ -14,6 +14,8 @@ PLANTS_GEOJSON = WEB_DATA / "plants.geojson"
 BA_GENERATION_CSV = ROOT / "data" / "ba_generation.csv"
 LIVE_GENERATION_CSV = ROOT / "data" / "live_generation.csv"
 CALIBRATION_JSON = ROOT / "data" / "calibration.json"
+METERED_CSV = ROOT / "data" / "metered_generation.csv"   # per-plant readings (Ontario)
+FLOWS_CSV = ROOT / "data" / "flows.csv"                  # Hydro-Québec's flows to neighbours
 WEATHER_CSV = ROOT / "data" / "weather.csv"
 PLANT_GENERATION_JSON = WEB_DATA / "generation.json"
 

@@ -18,7 +18,10 @@ import time
 import pandas as pd
 import requests
 
-from .common import BA_GENERATION_CSV, CALIBRATION_JSON, FUELS, HOURS, RAW, USER_AGENT, download, eia_api_key
+from .common import (
+    BA_GENERATION_CSV, CALIBRATION_JSON, FLOWS_CSV, FUELS, HOURS, METERED_CSV, PLANTS_GEOJSON, RAW, USER_AGENT,
+    download, eia_api_key,
+)
 
 API_URL = "https://api.eia.gov/v2/electricity/rto/fuel-type-data/data/"
 BULK_URL = "https://www.eia.gov/electricity/gridmonitor/sixMonthFiles/{name}"
@@ -190,7 +193,8 @@ def live_after_eia(eia, live):
         for ba, factor in factors.items():
             last_eia = ref[ba].dropna().index.max()
             after = feed if pd.isna(last_eia) else feed[feed.index > last_eia]
-            out.append(pd.DataFrame({"utc": after.index, "ba": ba, "fuel": fuel, "mw": after.to_numpy() * factor}))
+            out.append(pd.DataFrame({"utc": after.index, "ba": ba, "fuel": fuel, "mw": after.to_numpy() * factor,
+                                     "feed": iso}))
         if len(targets) > 1 or abs(factors.sum() - 1) > 0.05:
             split = ", ".join(f"{ba} ×{f:.2f}" for ba, f in factors.items())
             notes.append(f"{key}: calibrated to EIA as {split}")
@@ -224,6 +228,29 @@ def last_window(df, hours=HOURS):
     return window.sort_values(["utc", "ba", "fuel"]).reset_index(drop=True)
 
 
+def canada_rows():
+    """Ontario's and Québec's totals by fuel as live rows. Neither reports to EIA-930,
+    so there's nothing to calibrate against. Also saves Ontario's per-plant readings
+    and Québec's flows to its neighbours for allocate.py."""
+    from . import ontario, quebec
+
+    since = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=HOURS) - API_LAG_MARGIN
+    rows = []
+    try:
+        plants = pd.DataFrame([f["properties"] for f in json.loads(PLANTS_GEOJSON.read_text())["features"]])
+        per_plant, totals = ontario.build(since, plants)
+        per_plant.to_csv(METERED_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
+        rows.append(totals.assign(ba="IESO", feed="IESO"))
+    except Exception as e:
+        print(f"  Ontario (IESO) unavailable ({type(e).__name__}: {e})")
+    try:
+        rows.append(quebec.production().assign(ba="HQT", feed="Hydro-Québec"))
+        quebec.flows().to_csv(FLOWS_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
+    except Exception as e:
+        print(f"  Québec (Hydro-Québec) unavailable ({type(e).__name__}: {e})")
+    return pd.concat(rows, ignore_index=True).assign(source="live") if rows else pd.DataFrame()
+
+
 def build():
     key = eia_api_key()
     source = "EIA API v2" if key else "EIA-930 bulk CSV (no API key; refreshed daily)"
@@ -237,9 +264,13 @@ def build():
             print(f"  {note}")
         if len(extra):
             df = pd.concat([eia, extra.assign(source="live")], ignore_index=True)
-            source += " + live ISO feeds"
+            source += " + live grid-operator feeds"
     except Exception as e:  # gridstatus missing or an ISO site down: the map still works on EIA alone
-        print(f"Live ISO feeds unavailable ({type(e).__name__}: {e}); using EIA only")
+        print(f"Live grid-operator feeds unavailable ({type(e).__name__}: {e}); using EIA only")
+    canada = canada_rows()
+    if len(canada):
+        df = pd.concat([df, canada], ignore_index=True)
+        source += " + IESO and Hydro-Québec"
 
     window = last_window(df)
     BA_GENERATION_CSV.parent.mkdir(parents=True, exist_ok=True)

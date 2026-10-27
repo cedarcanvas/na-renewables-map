@@ -33,7 +33,7 @@ const PARTIAL = 0.9;
 const map = new maplibregl.Map({
   container: "map",
   style: "https://tiles.openfreemap.org/styles/positron",
-  bounds: [[-125, 24.5], [-66.5, 49.5]], // lower 48; a URL hash overrides this
+  bounds: [[-125, 24.5], [-63, 50.5]], // lower 48 and southern Canada; a URL hash overrides this
   fitBoundsOptions: { padding: 20 },
   hash: true,
   attributionControl: { compact: true },
@@ -83,7 +83,167 @@ async function init() {
   renderSources();
 
   await mapLoaded;
+  await addRegionLayers(); // first, so the plant circles draw on top
   addPlantLayers();
+  addFlowOverlay();
+}
+
+// --- Québec's flows to its neighbours (deck.gl arcs) -------------------------------
+
+// Representative points, not the actual converter stations or line routes.
+const QUEBEC = [-73.57, 45.5]; // Montréal
+const NEIGHBOURS = {
+  "New England": [-71.6, 42.6],
+  "New York": [-75.0, 42.9],
+  Ontario: [-75.7, 45.42],
+  "New Brunswick": [-66.64, 45.96],
+};
+let flowOverlay = null;
+
+function addFlowOverlay() {
+  if (typeof deck === "undefined" || !state.gen?.flows || !Object.keys(state.gen.flows).length) {
+    $("#show-flows").closest("label").hidden = true;
+    return;
+  }
+  flowOverlay = new deck.MapboxOverlay({
+    // deck.gl 9.4's interleaved mode (drawing inside MapLibre's WebGL context) blanks
+    // MapLibre 5.24's map; its own canvas on top works and the arcs sit above everything.
+    interleaved: false,
+    layers: flowLayers(),
+    getTooltip: ({ object }) => object && {
+      text: `${object.mw >= 0 ? `Québec → ${object.name}` : `${object.name} → Québec`}: ${fmt(Math.abs(object.mw))} MW\n` +
+        "As reported by Hydro-Québec (includes wheel-through).\nEndpoints are approximate.",
+    },
+  });
+  map.addControl(flowOverlay);
+  $("#show-flows").addEventListener("change", updateFlows);
+}
+
+function flowLayers() {
+  if (!$("#show-flows").checked) return [];
+  const flows = Object.entries(state.gen.flows)
+    .map(([name, series]) => ({ name, mw: series[state.hour] }))
+    .filter((f) => f.mw != null && Math.abs(f.mw) >= 1 && NEIGHBOURS[f.name]);
+  const ends = (f) => (f.mw >= 0 ? [QUEBEC, NEIGHBOURS[f.name]] : [NEIGHBOURS[f.name], QUEBEC]);
+  return [
+    new deck.ArcLayer({
+      id: "quebec-flows",
+      data: flows,
+      getSourcePosition: (f) => ends(f)[0],
+      getTargetPosition: (f) => ends(f)[1],
+      getSourceColor: [58, 111, 216, 230], // hydro blue at the sending end
+      getTargetColor: [58, 111, 216, 90],
+      getWidth: (f) => Math.max(1.5, Math.abs(f.mw) / 150),
+      widthUnits: "pixels",
+      getHeight: 0.35,
+      pickable: true,
+      updateTriggers: { getSourcePosition: state.hour, getTargetPosition: state.hour, getWidth: state.hour },
+    }),
+    new deck.TextLayer({
+      id: "quebec-flow-labels",
+      data: flows,
+      getPosition: (f) => NEIGHBOURS[f.name],
+      getText: (f) => `${fmt(Math.abs(f.mw))} MW ${f.mw >= 0 ? "from" : "to"} Québec`,
+      getSize: 12,
+      getColor: [40, 60, 110, 255],
+      getPixelOffset: [0, -26], // clear of the basemap's city label
+      fontFamily: "system-ui, -apple-system, sans-serif",
+      fontWeight: 600,
+      outlineWidth: 3,
+      outlineColor: [255, 255, 255, 230],
+      fontSettings: { sdf: true },
+      characterSet: "auto", // the default is ASCII only, which drops the é in Québec
+      updateTriggers: { getText: state.hour },
+    }),
+  ];
+}
+
+function updateFlows() {
+  flowOverlay?.setProps({ layers: flowLayers() });
+}
+
+// --- Grid regions -------------------------------------------------------------
+
+const REGION_LAYERS = ["region-fill", "region-lines", "region-labels"];
+
+async function addRegionLayers() {
+  let regions;
+  try {
+    regions = await loadJSON("data/regions.geojson");
+  } catch {
+    $(".layers").hidden = true; // not built yet: python -m pipeline.regions
+    return;
+  }
+  const polygons = ["==", ["geometry-type"], "Polygon"];
+  const multi = ["==", ["geometry-type"], "MultiPolygon"];
+  map.addSource("regions", { type: "geojson", data: regions });
+  // Invisible fill, there only so a click inside a region can be detected.
+  map.addLayer({ id: "region-fill", type: "fill", source: "regions", filter: ["any", polygons, multi],
+    paint: { "fill-opacity": 0 } });
+  map.addLayer({
+    id: "region-lines", type: "line", source: "regions", filter: ["any", polygons, multi],
+    paint: {
+      "line-color": "#7b8794",
+      "line-opacity": 0.7,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.6, 8, 1.4],
+      "line-dasharray": [3, 2],
+    },
+  });
+  map.addLayer({
+    id: "region-labels", type: "symbol", source: "regions", filter: ["==", ["geometry-type"], "Point"],
+    layout: {
+      "text-field": ["get", "short"],
+      "text-font": ["Noto Sans Regular"],
+      "text-size": ["interpolate", ["linear"], ["zoom"], 3, 9, 7, 12],
+      "text-transform": "uppercase",
+      "text-letter-spacing": 0.08,
+      "text-max-width": 8,
+    },
+    paint: { "text-color": "#5b6675", "text-halo-color": "#ffffff", "text-halo-width": 1.5 },
+  });
+
+  $("#show-regions").addEventListener("change", (e) => {
+    for (const id of REGION_LAYERS) map.setLayoutProperty(id, "visibility", e.target.checked ? "visible" : "none");
+  });
+  map.on("click", "region-fill", (e) => {
+    // A click on a plant opens the plant's popup instead.
+    if (map.queryRenderedFeatures(e.point, { layers: ["capacity"] }).length) return;
+    const seen = new Set();
+    const hits = e.features.map((f) => f.properties).filter((p) => !seen.has(p.code) && seen.add(p.code));
+    new maplibregl.Popup({ maxWidth: "280px" })
+      .setLngLat(e.lngLat)
+      .setHTML(`<div class="popup">${hits.map(regionSummary).join("")}</div>`)
+      .addTo(map);
+  });
+}
+
+function regionSummary(r) {
+  const g = state.gen;
+  const totals = g?.ba_totals?.[r.code] ?? {};
+  const caps = {};
+  for (const f of state.plants.features) {
+    if (f.properties.ba === r.code) caps[f.properties.fuel] = (caps[f.properties.fuel] ?? 0) + f.properties.cap;
+  }
+  const rows = Object.entries(FUELS)
+    .filter(([fuel]) => caps[fuel] || totals[fuel])
+    .map(([fuel, f]) => {
+      const mw = totals[fuel]?.[state.hour];
+      const pct = mw != null && caps[fuel] ? ` (${fmt((100 * Math.max(mw, 0)) / caps[fuel])}%)` : "";
+      return `<dt><span class="swatch" style="background:${f.color}"></span>${f.label}</dt>
+        <dd>${mw == null ? "no data" : `${fmt(Math.max(mw, 0))} MW${pct}`}</dd>`;
+    })
+    .join("");
+  const live = g?.live?.[r.code];
+  const hour = g?.hours[state.hour];
+  const source = !g ? ""
+    : live && hour >= live.from && hour <= live.until ? `${live.feed} live feed`
+    : Object.values(totals).some((s) => s[state.hour] != null) ? "EIA-930"
+    : "no data for this hour";
+  return `<div class="region">
+    <h3>${escapeHtml(r.name)}</h3>
+    <div class="muted small">${r.code}${source ? ` · ${source}` : ""}</div>
+    ${rows ? `<dl>${rows}</dl>` : `<div class="note">No wind, solar, hydro or geothermal plants mapped here yet.</div>`}
+  </div>`;
 }
 
 function addPlantLayers() {
@@ -145,6 +305,7 @@ function setHour(i) {
   state.hour = i;
   $("#slider").value = i;
   map.getSource("plants")?.setData(featuresForHour());
+  updateFlows();
   renderPanel();
 }
 
@@ -239,8 +400,8 @@ function renderCoverage(caps) {
   let text;
   if (!feeds.length) text = "Source: EIA-930.";
   else if (state.gen.eia_until && hour > state.gen.eia_until)
-    text = `Source: live ISO feeds (${feeds.join(", ")}). Other regions appear once EIA-930 publishes them.`;
-  else text = `Source: EIA-930, plus live ISO feeds (${feeds.join(", ")}) where EIA hasn't reported yet.`;
+    text = `Source: live grid-operator feeds (${feeds.join(", ")}). Other regions appear once EIA-930 publishes them.`;
+  else text = `Source: EIA-930, plus live grid-operator feeds (${feeds.join(", ")}) where EIA hasn't reported yet.`;
 
   const partial = Object.entries(FUELS)
     .filter(([fuel]) => coveredCap(fuel, caps) < PARTIAL * caps[fuel])
@@ -278,6 +439,8 @@ function renderSources() {
     ${Object.keys(g?.live ?? {}).length ? `Live fuel mix: ${[...new Set(Object.values(g.live).map((l) => l.feed))].join(", ")},
       via <a href="https://github.com/gridstatus/gridstatus">gridstatus</a>.` : ""}
     ${g?.weighting === "weather" ? `Weather: <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY 4.0).` : ""}
+    Grid regions: HIFLD Control Areas (archived on <a href="https://source.coop/seerai/hifld">source.coop</a>),
+    <a href="https://www.naturalearthdata.com/">Natural Earth</a>.
     Basemap: <a href="https://openfreemap.org">OpenFreeMap</a> © OpenMapTiles © OpenStreetMap contributors.`;
 }
 
@@ -324,16 +487,21 @@ function showPopup(id) {
     .addTo(map);
 }
 
+const HOURLY_FEEDS = new Set(["Hydro-Québec", "IESO"]);
+
 function popupNote(p, mw, weighted) {
   const region = p.ba || "its region";
   const live = state.gen.live?.[p.ba];
   if (mw == null && live && state.gen.hours[state.hour] > live.until)
     return `No data for this hour yet: ${live.feed}'s live feed runs a little behind the others.`;
   if (mw == null) return `No data for this hour yet: ${region}'s figures haven't been published.`;
+  if (state.gen.metered?.includes(p.id))
+    return `Metered: ${live?.feed ?? region}'s hourly reading for this plant (shared by capacity where one meter covers several plants).`;
   const fromLive = live && state.gen.hours[state.hour] >= live.from;
-  const source = fromLive
-    ? `${live.feed}'s live ${p.fuel} feed (5-minute readings averaged over the hour)`
-    : `${region}'s ${p.fuel} total reported to EIA`;
+  // The ISOs and BPA post every 5 minutes; Hydro-Québec and IESO post hourly figures.
+  const source = !fromLive ? `${region}'s ${p.fuel} total reported to EIA`
+    : HOURLY_FEEDS.has(live.feed) ? `${live.feed}'s hourly ${p.fuel} figure`
+    : `${live.feed}'s live ${p.fuel} feed (5-minute readings averaged over the hour)`;
   const weighting = weighted ? `, weighted by local ${p.fuel === "wind" ? "wind" : "sunshine"}` : "";
   return `Estimated: a share of ${source}${weighting}, not metered at the plant.`;
 }

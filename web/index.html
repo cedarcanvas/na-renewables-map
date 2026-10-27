@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>US Renewables Map</title>
+  <title>North American Renewables Map</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <aside id="panel">
     <header>
-      <h1>US Renewables Map</h1>
+      <h1>North American Renewables Map</h1>
       <p class="sub">Prototype. Plant output is <strong>estimated</strong> by splitting each grid region's
-        hourly total among its plants<span id="weighting"></span>.</p>
+        hourly total among its plants<span id="weighting"></span>. Ontario's large plants are metered.</p>
     </header>
 
     <section id="time">
@@ -37,6 +37,11 @@
       </table>
     </section>
 
+    <section class="layers small">
+      <label><input type="checkbox" id="show-regions" checked> Grid regions</label>
+      <label><input type="checkbox" id="show-flows" checked> Québec power flows</label>
+    </section>
+
     <section id="notice" hidden></section>
 
     <section>
@@ -49,7 +54,8 @@
 
     <footer class="muted small">
       <p>Circle area is proportional to MW: the outline is nameplate capacity, the solid fill is the
-        estimate for the selected hour. A grey outline means that plant's region has no data for the hour yet.</p>
+        estimate for the selected hour. A grey outline means that plant's region has no data for the hour yet.
+        Dashed lines are grid regions; US ones are approximate and some overlap. Click inside one for its totals.</p>
       <p id="sources"></p>
     </footer>
   </aside>
@@ -57,6 +63,7 @@
   <main id="map"></main>
 
   <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/deck.gl@9.4.0/dist.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

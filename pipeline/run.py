@@ -7,16 +7,21 @@
 import sys
 import time
 
-from . import allocate, generation, plants, weather
+from . import allocate, generation, plants, regions, weather
 from .common import PLANTS_GEOJSON
 
 PLANTS_MAX_AGE_DAYS = 30
 
 
+def stale(path, days=PLANTS_MAX_AGE_DAYS):
+    return not path.exists() or time.time() - path.stat().st_mtime > days * 86400
+
+
 def main(argv):
-    old = not PLANTS_GEOJSON.exists() or time.time() - PLANTS_GEOJSON.stat().st_mtime > PLANTS_MAX_AGE_DAYS * 86400
-    if old or "--refresh-plants" in argv:
+    if stale(PLANTS_GEOJSON) or "--refresh-plants" in argv:
         plants.build()
+    if stale(regions.REGIONS_GEOJSON) or "--refresh-plants" in argv:
+        regions.build()
     _, source = generation.build()
     try:
         wx = weather.build()

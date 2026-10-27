@@ -19,7 +19,9 @@ import numpy as np
 import pandas as pd
 
 from . import weather as wx
-from .common import BA_GENERATION_CSV, FUELS, PLANT_GENERATION_JSON, PLANTS_GEOJSON, WEATHER_CSV, write_json
+from .common import (
+    BA_GENERATION_CSV, FLOWS_CSV, FUELS, METERED_CSV, PLANT_GENERATION_JSON, PLANTS_GEOJSON, WEATHER_CSV, write_json,
+)
 from .curves import solar_capacity_factor, wind_capacity_factor
 
 # For each weather-weighted fuel: the weather column it uses and its curve.
@@ -78,6 +80,37 @@ def live_isos():
     return ISOS
 
 
+def load_metered(hours):
+    """{plant id: array of MW per hour} from METERED_CSV (Ontario's IESO readings)."""
+    if not METERED_CSV.exists():
+        return {}
+    m = pd.read_csv(METERED_CSV, parse_dates=["utc"])
+    index = {h: i for i, h in enumerate(hours)}
+    out = {}
+    for pid, g in m[m["utc"].isin(index)].groupby("plant_id"):
+        arr = np.full(len(hours), np.nan)
+        arr[[index[h] for h in g["utc"]]] = g["mw"].to_numpy()
+        out[pid] = arr
+    return out
+
+
+def aligned_flows(hours):
+    """{neighbour: [MW out of Québec, or null]} on the map's hours."""
+    if not FLOWS_CSV.exists():
+        return {}
+    f = pd.read_csv(FLOWS_CSV, parse_dates=["utc"]).pivot_table(index="utc", columns="neighbour", values="mw")
+    f = f.reindex(pd.DatetimeIndex(hours))
+    return {n: [compact(v) for v in f[n].to_numpy()] for n in f.columns}
+
+
+def ba_totals(totals):
+    """{(ba, fuel): array} -> {ba: {fuel: [MW or null per hour]}}."""
+    out = {}
+    for (ba, fuel), arr in totals.items():
+        out.setdefault(ba, {})[fuel] = [compact(v) for v in arr]
+    return out
+
+
 def compact(v):
     if v is None or np.isnan(v):
         return None
@@ -107,6 +140,7 @@ def build(source="EIA-930", weather=None):
         weather = pd.read_csv(WEATHER_CSV)
     grids = weather_grids(weather, hours)
     cells = wx.plant_cells()
+    metered = load_metered(hours)
 
     # (ba, fuel) -> array of MW per hour, NaN where the BA didn't report.
     totals = {}
@@ -141,12 +175,22 @@ def build(source="EIA-930", weather=None):
             row_mean = np.nansum(cf, axis=1, keepdims=True) / np.maximum(known.sum(axis=1, keepdims=True), 1)
             cf = np.where(known, cf, np.where(known.any(axis=1, keepdims=True), row_mean, np.nan))
 
+        # Plants with their own meter readings (Ontario) take those; what's left of
+        # the region's total is split among the rest as usual.
+        has_meter = group["id"].isin(metered).to_numpy()
+        free = ~has_meter
+        if has_meter.any():
+            meter = np.column_stack([metered[pid] for pid in group["id"][has_meter]])
+            ba_total = ba_total - np.nansum(meter, axis=1)
+
         est = np.full((len(hours), len(caps)), np.nan)
         for i, total in enumerate(ba_total):
-            if np.isnan(total):
+            if np.isnan(total) or not free.any():
                 continue
-            weights = None if cf is None or np.isnan(cf[i]).all() else cf[i]
-            est[i] = allocate(float(total), caps, weights)
+            weights = None if cf is None or np.isnan(cf[i][free]).all() else cf[i][free]
+            est[i, free] = allocate(float(total), caps[free], weights)
+        if has_meter.any():
+            est[:, has_meter] = meter
         for j, pid in enumerate(group["id"]):
             series[pid] = [compact(v) for v in est[:, j]]
 
@@ -154,12 +198,13 @@ def build(source="EIA-930", weather=None):
         fuel: [compact(v) for v in np.nansum([a for (ba, f), a in totals.items() if f == fuel], axis=0)]
         for fuel in FUELS
     }
-    # BA -> first and last hours taken from its ISO's live feed, and which feed.
+    # BA -> first and last hours taken from a live feed, and which feed.
     feed_of = {ba: name for name, (_, bas, _) in live_isos().items() for ba in bas}
-    live = {
-        ba: {"from": stamp(span["min"]), "until": stamp(span["max"]), "feed": feed_of.get(ba, ba)}
-        for ba, span in gen[gen["source"] == "live"].groupby("ba")["utc"].agg(["min", "max"]).iterrows()
-    }
+    live_rows = gen[gen["source"] == "live"]
+    live = {}
+    for ba, g in live_rows.groupby("ba"):
+        feed = g["feed"].dropna().iloc[0] if "feed" in g and g["feed"].notna().any() else feed_of.get(ba, ba)
+        live[ba] = {"from": stamp(g["utc"].min()), "until": stamp(g["utc"].max()), "feed": feed}
     eia_until = gen.loc[gen["source"] == "eia", "utc"].max()
     write_json({
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -169,8 +214,12 @@ def build(source="EIA-930", weather=None):
         "hours": [stamp(h) for h in hours],
         "totals": fuel_totals,
         "covered_cap": {fuel: [round(v) for v in arr] for fuel, arr in covered.items()},
+        # Each region's own reported totals, for the region popups.
+        "ba_totals": ba_totals(totals),
         "eia_until": stamp(eia_until),
         "live": live,
+        "metered": sorted(metered),
+        "flows": aligned_flows(hours),
         "series": series,
         "weather": plant_weather,
     }, PLANT_GENERATION_JSON)

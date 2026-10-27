@@ -20,7 +20,7 @@ import warnings
 
 import pandas as pd
 
-from .common import LIVE_GENERATION_CSV, env_value
+from .common import LIVE_GENERATION_CSV, USER_AGENT, env_value
 
 # ISO -> (gridstatus class, EIA BAs the feed covers, {our fuel: ISO columns to add up}).
 # A fuel left out here stays on EIA for those BAs.
@@ -37,6 +37,9 @@ ISOS = {
     # NYISO folds solar into "Other Renewables", so NYISO solar stays on EIA.
     "NYISO": ("NYISO", ["NYIS"], {"wind": ["Wind"], "hydro": ["Hydro"]}),
     "ISO-NE": ("ISONE", ["ISNE"], {"wind": ["Wind"], "solar": ["Solar"], "hydro": ["Hydro"]}),
+    # Not an ISO, but Bonneville posts its own 5-minute data. "VER" is wind plus
+    # solar; it's calibrated against EIA's BPAT wind, BPA's solar being small.
+    "BPA": ("BPA", ["BPAT"], {"wind": ["VER"], "hydro": ["Hydro"]}),
     "PJM": ("PJM", ["PJM"], {"wind": ["Wind"], "solar": ["Solar"], "hydro": ["Hydro"]}),
 }
 
@@ -49,7 +52,31 @@ MIN_READINGS_PER_HOUR = 3
 KEEP = pd.Timedelta(days=4)
 
 
+class BPAFeed:
+    """Bonneville's public 5-minute BA data (last 7 days), shaped like a gridstatus fuel mix."""
+
+    URL = "https://transmission.bpa.gov/business/operations/wind/baltwg.txt"
+    default_timezone = "America/Los_Angeles"
+
+    def get_fuel_mix(self, date):
+        import io
+
+        import requests
+
+        r = requests.get(self.URL, headers={"User-Agent": USER_AGENT}, timeout=60)
+        r.raise_for_status()
+        # Eleven lines of notes, then a tab-separated table in Pacific time.
+        df = pd.read_csv(io.StringIO(r.text), sep="\t", skiprows=11)
+        df.columns = [c.strip() for c in df.columns]
+        df["Time"] = (pd.to_datetime(df["Date/Time"], format="%m/%d/%Y %H:%M")
+                      .dt.tz_localize(self.default_timezone, ambiguous="NaT", nonexistent="NaT"))
+        return df.dropna(subset=["Time"])  # one week covers any `date` asked for
+
+
 def _iso(cls_name):
+    if cls_name == "BPA":
+        return BPAFeed()
+
     import gridstatus as gs  # imported here so the rest of the pipeline works without it
 
     if cls_name == "PJM":

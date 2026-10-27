@@ -1,7 +1,8 @@
-# US Renewables Map (prototype)
+# North American Renewables Map (prototype)
 
-A map of where US wind, solar, hydro and geothermal power is coming from, hour
-by hour, in the spirit of Robin Hawkes' [GB Renewables Map](https://renewables-map.robinhawkes.com/).
+A map of where US and Canadian wind, solar, hydro and geothermal power is
+coming from, hour by hour, in the spirit of Robin Hawkes'
+[GB Renewables Map](https://renewables-map.robinhawkes.com/).
 
 Unlike Great Britain, the US doesn't publish live output per plant. EIA-930
 gives hourly totals by fuel for each balancing authority (grid region), so
@@ -12,8 +13,15 @@ sunshine, so a windy corner of a region gets more than a calm one.
 EIA-930 generation has run up to a day behind (it seems to arrive in daily
 batches), so for the hours after it ends the map uses the ISOs' own 5-minute
 fuel-mix feeds, calibrated against EIA over the hours both cover. They hold
-about 82% of US wind and 66% of solar capacity; other regions show as "no
-data" (grey outlines) until EIA publishes them.
+about 82% of US wind and 66% of solar capacity. Bonneville (BPA) posts its own
+5-minute data too, which covers most of the Pacific Northwest's hydro and wind.
+Other regions show as "no data" (grey outlines) until EIA publishes them.
+
+Canada: Ontario's large plants show **metered** output from IESO's hourly
+per-generator report. Québec's production by source comes from Hydro-Québec's
+open data and is split across its plants like a US region, and Hydro-Québec's
+hourly flows to New England, New York, Ontario and New Brunswick are drawn as
+arcs (deck.gl). Other provinces show capacity only for now.
 
 ## Data
 
@@ -22,6 +30,12 @@ data" (grey outlines) until EIA publishes them.
 | Plants, capacity, coordinates, region | [EIA-860M](https://www.eia.gov/electricity/data/eia860m/) | monthly |
 | Hourly totals by region and fuel | [EIA-930](https://www.eia.gov/electricity/gridmonitor/): API v2 with a key, otherwise the six-month bulk CSV | generation up to a day behind |
 | Live fuel mix for CAISO, ERCOT, SPP, MISO, NYISO, ISO-NE (PJM with a key) | the ISOs' public feeds via [gridstatus](https://github.com/gridstatus/gridstatus) | every 5 minutes; SPP an hour or two behind |
+| Bonneville (BPA) wind + solar and hydro | [BPA's 5-minute BA data](https://transmission.bpa.gov/business/operations/wind/baltwg.txt) | every 5 minutes |
+| Canadian wind farms | NRCan [Canadian Wind Turbine Database](https://open.canada.ca/data/en/dataset/79fdad93-9025-49ad-ba16-c26d718cc070) (map service) | monthly with plants |
+| Canadian hydro and solar plants | NACEI renewable plants ≥ 1 MW (2017; thin for newer solar) | monthly with plants |
+| Ontario output per generator | IESO Generator Output and Capability report, via gridstatus; codes matched to plants in `pipeline/ontario.py` | hourly |
+| Québec production by source, and flows to neighbours | [Hydro-Québec open data](https://donnees.hydroquebec.com/) | hourly, ~3 h behind |
+| Grid regions | HIFLD Control Areas ([archived on source.coop](https://source.coop/seerai/hifld)) matched to EIA-930 codes; Natural Earth provinces | monthly with plants |
 | Hub-height wind and sunshine per 0.5° cell | [Open-Meteo](https://open-meteo.com/) Forecast API (CC BY 4.0; free API is non-commercial) | recent hours plus 24 h of forecast, refreshed every 6 hours |
 | Basemap | [OpenFreeMap](https://openfreemap.org) Positron | — |
 
@@ -73,7 +87,10 @@ once EIA publishes hours the history covers.
 ## Pipeline
 
 - `pipeline/plants.py`: EIA-860M → `web/data/plants.geojson`, one point per plant and fuel
-- `pipeline/live.py`: the ISOs' fuel mix for yesterday and today → `data/live_generation.csv`, averaged into end-of-hour MW (about 2 minutes, mostly SPP)
+- `pipeline/canada.py`: Canadian wind, hydro and solar plants, appended to `plants.geojson`
+- `pipeline/regions.py`: grid-region outlines and label points → `web/data/regions.geojson`
+- `pipeline/ontario.py`, `pipeline/quebec.py`: IESO per-generator readings; Hydro-Québec production and flows
+- `pipeline/live.py`: the ISOs' (and BPA's) fuel mix for yesterday and today → `data/live_generation.csv`, averaged into end-of-hour MW (about 2 minutes, mostly SPP)
 - `pipeline/generation.py`: EIA-930, plus calibrated live ISO hours after EIA ends → `data/ba_generation.csv`, the last 48 hours by region and fuel
 - `pipeline/weather.py`: Open-Meteo → `data/weather.csv`, hourly wind at ~100 m and sunshine for each 0.5° cell with plants (~1,600 cells, about 3 minutes; the free tier allows 10,000 locations a day)
 - `pipeline/curves.py`: turns local weather into each plant's expected capacity factor

@@ -9,6 +9,7 @@ import datetime as dt
 
 import pandas as pd
 
+from . import canada
 from .common import BA_ALIASES, FUELS, PLANTS_GEOJSON, RAW, download, url_exists, write_json
 
 BASE = "https://www.eia.gov/electricity/data/eia860m"
@@ -93,12 +94,17 @@ def build(today=None):
                 "cap": round(float(p.cap), 1),
                 "ba": p.ba,
                 "state": p.state,
+                "country": "US",
                 "units": int(p.units),
                 "op_year": None if pd.isna(p.op_year) else int(p.op_year),
             },
         }
         for p in plants.itertuples()
     ]
+    try:
+        features += canada.plants()
+    except Exception as e:  # NRCan's services down: keep last month's Canada out rather than fail
+        print(f"Canadian plants unavailable ({type(e).__name__}: {e}); US only")
     write_json(
         {"type": "FeatureCollection", "source": url, "features": features},
         PLANTS_GEOJSON,
