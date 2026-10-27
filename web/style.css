@@ -255,7 +255,7 @@ footer a { color: inherit; }
   display: grid; grid-template-columns: auto 1fr; grid-template-areas: "sample head" "list list";
   gap: 6px 10px; align-items: center; margin-top: 10px;
 }
-.key-item + .key-item { border-top: 1px solid var(--line); padding-top: 10px; }
+.key-item:not([hidden]) + .key-item { border-top: 1px solid var(--line); padding-top: 10px; }
 .key-sample { grid-area: sample; display: block; }
 .key-head { grid-area: head; }
 .key-head h3 { margin: 0 0 4px; font-size: 12px; }
@@ -263,6 +263,11 @@ footer a { color: inherit; }
 .key-list { grid-area: list; margin: 0; padding-left: 16px; }
 .key-list li { margin: 0 0 4px; }
 .key-list .rose-key { margin: 0 6px 0 0; }
+.key-lines h3 { margin: 10px 0 4px; font-size: 12px; }
+.line-key { list-style: none; margin: 0; padding: 0; }
+.line-key li { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; }
+.key-lines p { margin: 4px 0 0; }
+#key-lines:not([hidden]) ~ #key-regional:not([hidden]) { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
 .sun-chart { margin-top: 8px; }
 .sun-chart-key { display: flex; gap: 4px; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
 .sun-chart-key .rose-key { margin: 0 8px 0 0; }

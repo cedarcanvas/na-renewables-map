@@ -38,12 +38,12 @@ const BASEMAPS = {
 };
 const THEME_COLORS = {
   light: {
-    region: "#6d28d9", regionCasing: "#ffffff", regionLabel: "#5b21b6", halo: "#ffffff", hover: "#7c3aed",
+    region: "#6d28d9", regionLabel: "#5b21b6", halo: "#ffffff", hover: "#7c3aed",
     noData: "#9aa3ad", particles: [30, 41, 59], cloudBrightness: [0, 0.75],
     flowLabel: [40, 60, 110, 255], flowHalo: [255, 255, 255, 230],
   },
   dark: {
-    region: "#a78bfa", regionCasing: "#0c0c0c", regionLabel: "#c4b5fd", halo: "#0c0c0c", hover: "#a78bfa",
+    region: "#a78bfa", regionLabel: "#c4b5fd", halo: "#0c0c0c", hover: "#a78bfa",
     noData: "#5b6573", particles: [226, 232, 240], cloudBrightness: [0.3, 0.85],
     flowLabel: [191, 219, 254, 255], flowHalo: [12, 12, 12, 230],
   },
@@ -78,7 +78,7 @@ map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top
 const mapLoaded = new Promise((resolve) => map.once("load", resolve));
 
 // Our sources; everything else in the style belongs to the basemap.
-const OWN_SOURCES = new Set(["plants", "regions", "clouds"]);
+const OWN_SOURCES = new Set(["plants", "regions", "transmission", "clouds"]);
 
 function setTheme(choice) {
   themeChoice = choice;
@@ -110,7 +110,6 @@ function applyThemeColors() {
   const c = colors();
   const paint = (layer, prop, value) => map.getLayer(layer) && map.setPaintProperty(layer, prop, value);
   paint("region-fill", "fill-color", c.hover);
-  paint("region-casing", "line-color", c.regionCasing);
   paint("region-lines", "line-color", c.region);
   paint("region-labels", "text-color", c.regionLabel);
   paint("region-labels", "text-halo-color", c.halo);
@@ -120,9 +119,10 @@ function applyThemeColors() {
   paint("clouds", "raster-brightness-max", c.cloudBrightness[1]);
   updateFlows();
   updateHistoryTheme();
+  applyLineTheme();
   weather.roses?.render();
   weather.sunArcs?.render();
-  updateGlyphKey();
+  updateMapKey();
 }
 
 async function loadJSON(url) {
@@ -173,8 +173,10 @@ async function init() {
   renderSources();
 
   await mapLoaded;
-  await addRegionLayers(); // first, so the plant circles draw on top
+  await addRegionLayers(); // first, so the lines and plant circles draw on top
+  await addTransmissionLayers();
   addPlantLayers();
+  updateMapKey();
   addFlowOverlay();
   addSunArcs();
   await addWeatherLayers();
@@ -269,7 +271,7 @@ function updateFlows() {
 
 // --- Grid regions -------------------------------------------------------------
 
-const REGION_LAYERS = ["region-fill", "region-casing", "region-lines", "region-labels"];
+const REGION_LAYERS = ["region-fill", "region-lines", "region-labels"];
 let hoveredRegion = null;
 
 async function addRegionLayers() {
@@ -290,25 +292,15 @@ async function addRegionLayers() {
       "fill-color": c.hover,
       "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.1, 0],
     } });
-  // A casing in the basemap's own colour keeps the line legible over roads and borders.
-  map.addLayer({
-    id: "region-casing", type: "line", source: "regions", filter: areas,
-    layout: { "line-join": "round" },
-    paint: {
-      "line-color": c.regionCasing,
-      "line-opacity": 0.85,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 3, 2.6, 8, 4.4],
-    },
-  });
+  // A hairline, faint until hovered, so the outlines sit behind the plants and weather.
+  const hovered = ["boolean", ["feature-state", "hover"], false];
   map.addLayer({
     id: "region-lines", type: "line", source: "regions", filter: areas,
     layout: { "line-join": "round" },
     paint: {
       "line-color": c.region,
-      "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0.75],
-      "line-width": ["interpolate", ["linear"], ["zoom"], 3,
-        ["case", ["boolean", ["feature-state", "hover"], false], 2.2, 1.1], 8,
-        ["case", ["boolean", ["feature-state", "hover"], false], 3.6, 2.2]],
+      "line-opacity": ["case", hovered, 0.9, 0.35],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 3, ["case", hovered, 1.6, 0.6], 8, ["case", hovered, 2.4, 1]],
     },
   });
   map.addLayer({
@@ -330,8 +322,8 @@ async function addRegionLayers() {
   map.on("mousemove", "region-fill", (e) => setHoveredRegion(e.features[0]?.properties.code));
   map.on("mouseleave", "region-fill", () => setHoveredRegion(null));
   map.on("click", "region-fill", (e) => {
-    // A click on a plant opens the plant's popup instead.
-    if (map.queryRenderedFeatures(e.point, { layers: ["capacity"] }).length) return;
+    // A click on a plant or a line opens that popup instead.
+    if (map.queryRenderedFeatures(e.point, { layers: ["capacity"] }).length || lineAt(e.point)) return;
     const seen = new Set();
     const hits = e.features.map((f) => f.properties).filter((p) => !seen.has(p.code) && seen.add(p.code));
     new maplibregl.Popup({ maxWidth: "280px" })

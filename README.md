@@ -38,8 +38,13 @@ BC, Manitoba and Newfoundland and Labrador show capacity only.
 `web/` is static: MapLibre for the map, deck.gl for Québec's flow arcs, and a
 canvas over the map for wind particles (`weather.js`, the technique behind
 earth.nullschool and Windy). Layers: plants (outline = capacity, fill = the
-hour's output), grid regions, Québec flows, wind at 100 m, cloud cover, and
-wind roses and sun arcs. Both are regional symbols, never one plant's: each
+hour's output), grid regions, transmission lines, Québec flows, wind at 100 m,
+cloud cover, and wind roses and sun arcs. Transmission lines come as vector
+tiles in one PMTiles file (read with the pmtiles library, so a plain static
+server still works), drawn as fine dotted lines (white on the dark map, grey on the
+light one) with bigger dots for higher voltages; lines under 200 kV only
+appear as you zoom in, and clicking one shows its voltage, owner and end
+substations. Roses and arcs are regional symbols, never one plant's: each
 stands for all of a fuel's plants in a 5° grid cell (3° from zoom 4.5) with at
 least 1,500 MW, drawn at their capacity-weighted centre. A wind rose is 48 hours
 of GFS wind at those farms (each farm's hours weighted by its capacity) as 16
@@ -85,6 +90,8 @@ system, wind is drawn as still streaks.
 | Grid regions | HIFLD Control Areas ([archived on source.coop](https://source.coop/seerai/hifld)) matched to EIA-930 codes; Natural Earth provinces | monthly with plants |
 | Wind at 100 m and cloud cover for the map's weather layers | NOAA [GFS](https://www.nco.ncep.noaa.gov/pmb/products/gfs/) 0.25°, hourly steps, via the NOMADS filter (public domain) | each run fetches only new hours |
 | Hub-height wind and sunshine per 0.5° cell | [Open-Meteo](https://open-meteo.com/) Forecast API (CC BY 4.0; free API is non-commercial) | recent hours plus 24 h of forecast, refreshed every 6 hours |
+| Transmission lines, US | HIFLD Transmission Lines ([archived on source.coop](https://source.coop/seerai/hifld)), in service or status unknown | monthly with plants (the archive is fixed) |
+| Transmission lines, Canada | [OpenStreetMap](https://www.openstreetmap.org/copyright) `power=line` via Overpass (ODbL); NRCan's CanVec lines have no voltage | monthly with plants |
 | Basemap | [OpenFreeMap](https://openfreemap.org) Positron | — |
 
 ## Run it
@@ -94,10 +101,13 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cp .env.example .env   # optional: add your EIA API key for fresher data
 .venv/bin/python -m pipeline.run
-python3 -m http.server 8765 --directory web
+python3 scripts/serve.py
 ```
 
-Then open http://localhost:8765.
+Then open http://localhost:8765. `scripts/serve.py` is Python's static server
+plus HTTP Range requests, which the transmission-line tiles need (the pmtiles
+library reads the one file a few kilobytes at a time); `python3 -m http.server`
+serves everything else but leaves the lines off. Any real host supports Range.
 
 ## Hourly refresh (macOS)
 
@@ -137,6 +147,7 @@ once EIA publishes hours the history covers.
 - `pipeline/plants.py`: EIA-860M → `web/data/plants.geojson`, one point per plant and fuel
 - `pipeline/canada.py`: Canadian wind, hydro and solar plants, appended to `plants.geojson`
 - `pipeline/regions.py`: grid-region outlines and label points → `web/data/regions.geojson`
+- `pipeline/transmission.py`: HIFLD and OpenStreetMap lines → `web/data/transmission.pmtiles` (GDAL's PMTiles writer; a few minutes, mostly Overpass)
 - `pipeline/ontario.py`, `pipeline/quebec.py`: IESO per-generator readings; Hydro-Québec production and flows
 - `pipeline/snapshots.py`, `pipeline/alberta.py`: AESO, NS Power, NB Power and SaskPower readings kept as hourly history; AESO assets matched to plants
 - `pipeline/live.py`: the ISOs' (and BPA's) fuel mix for yesterday and today → `data/live_generation.csv`, averaged into end-of-hour MW (about 2 minutes, mostly SPP)
@@ -155,5 +166,5 @@ Region codes that differ between the two EIA datasets are mapped in
 - Per-farm hub heights from the US Wind Turbine Database instead of a flat 100 m
 - From the GB map: Normalise and colour-scale display options, curtailment,
   outage notices, pressure / temperature / solar radiation layers, forecast
-  hours, transmission lines, satellite imagery, individual turbines
+  hours, satellite imagery, individual turbines
 - Hosting

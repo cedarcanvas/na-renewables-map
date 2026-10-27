@@ -58,16 +58,19 @@
     <section class="layers small">
       <label><input type="checkbox" id="show-regions" checked> Grid regions</label>
       <label><input type="checkbox" id="show-flows" checked> Cross-border flows</label>
+      <label><input type="checkbox" id="show-lines" checked> Transmission lines</label>
       <label hidden><input type="checkbox" id="show-wind" checked> Wind at 100 m</label>
       <label hidden><input type="checkbox" id="show-clouds"> Cloud cover</label>
       <label hidden><input type="checkbox" id="show-roses"> Wind roses</label>
       <label hidden><input type="checkbox" id="show-sun"> Sun arcs</label>
     </section>
 
-    <section id="glyph-key" class="card small" aria-labelledby="key-title" hidden>
-      <h2 id="key-title">Weather symbols</h2>
-      <p class="muted note">Each symbol sums up a region: all the wind or solar farms within a few
-        degrees, drawn at the capacity-weighted centre of them. They show regional conditions, not any one farm's.</p>
+    <section id="map-key" class="card small" aria-labelledby="key-title" hidden>
+      <h2 id="key-title">Map key</h2>
+      <div id="key-lines" class="key-lines" hidden></div>
+      <p id="key-regional" class="muted note" hidden>Wind roses and sun arcs each sum up a region: all the
+        wind or solar farms within a few degrees, drawn at the capacity-weighted centre of them. They show
+        regional conditions, not any one farm's.</p>
       <div id="key-roses" class="key-item" hidden></div>
       <div id="key-sun" class="key-item" hidden></div>
     </section>
@@ -111,8 +114,10 @@
   <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/deck.gl@9.4.0/dist.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js" integrity="sha384-pbKNZbDshUsLnZMIVsn/t+j3xEY9PGfuX5Z22l5rcy/obXz3EwaMx1F5d9sRsJMn" crossorigin="anonymous"></script>
   <script src="weather.js"></script>
   <script src="sun.js"></script>
+  <script src="transmission.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

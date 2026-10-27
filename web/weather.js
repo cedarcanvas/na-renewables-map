@@ -360,16 +360,19 @@ function roseKeyHtml() {
     </ul>`;
 }
 
-function updateGlyphKey() {
-  const items = [["#key-roses", weather.roses, roseKeyHtml], ["#key-sun", weather.sunArcs, sunKeyHtml]];
-  let any = false;
-  for (const [id, layer, html] of items) {
-    const on = Boolean(layer?.visible);
+// The side panel's map key: a section for each of these layers that's on.
+function updateMapKey() {
+  const items = [
+    ["#key-lines", typeof linesVisible === "function" && linesVisible(), linesKeyHtml],
+    ["#key-roses", weather.roses?.visible, roseKeyHtml],
+    ["#key-sun", weather.sunArcs?.visible, sunKeyHtml],
+  ];
+  for (const [id, on, html] of items) {
     $(id).hidden = !on;
     if (on) $(id).innerHTML = html();
-    any ||= on;
   }
-  $("#glyph-key").hidden = !any;
+  $("#key-regional").hidden = !(weather.roses?.visible || weather.sunArcs?.visible);
+  $("#map-key").hidden = items.every(([, on]) => !on);
 }
 
 // Glyphs on the map for one fuel (wind roses, sun arcs). Each stands for a region, not a
@@ -385,7 +388,7 @@ class SiteGlyphs {
 
   setVisible(on) {
     this.visible = on;
-    updateGlyphKey();
+    updateMapKey();
     this.render();
   }
 
