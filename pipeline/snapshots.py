@@ -25,7 +25,9 @@ from .common import RAW, USER_AGENT
 
 SNAPSHOTS_CSV = RAW.parent / "snapshots.csv"
 ASSETS_CSV = RAW / "aeso_assets.csv"
-KEEP = pd.Timedelta(days=4)
+# The map needs only 2 days; the rest is Alberta's per-plant history for backtest.py,
+# which AESO doesn't keep for us (about 4 MB a month).
+KEEP = pd.Timedelta(days=30)
 
 AESO_URL = "http://ets.aeso.ca/ets_web/ip/Market/Reports/CSDReportServlet"
 NS_URL = "https://resourcesprd-nspower.aws.silvertech.net/oasis/current_report.shtml"

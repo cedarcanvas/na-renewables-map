@@ -70,6 +70,36 @@ A theme button switches Auto (follows the system), Light and Dark, including
 the basemap (OpenFreeMap Positron / Dark). With "reduce motion" set in the
 system, wind is drawn as still streaks.
 
+## How good are the estimates?
+
+Ontario and Alberta meter every large wind and solar farm, so they double as a
+test: `pipeline/backtest.py` hands `allocate()` only a province's total, as if
+it were a US region, and compares its split with each farm's meter. Four weeks
+of Ontario (29 Sep to 27 Oct 2026, farms whose meter matches their listed
+capacity):
+
+| | Farms | Error, % of capacity: weather split | Capacity-only split | Weather is better by |
+|---|---|---|---|---|
+| Wind | 31 | 8.7% | 15.1% | 42% |
+| Solar (daylight) | 4 | 8.8% | 11.3% | 22% |
+
+A typical wind farm-hour is still off by over a quarter of what the farm made,
+so read single plants as rough and regions as solid. The farm curve in
+`curves.py` runs higher than real farms above 6 m/s, but only its shape matters
+for a split: a curve fitted to Ontario's farms scored the same on held-out
+hours. Coarse weather cost more: wind used to come from 0.5° cells, where
+nearby farms shared one wind speed; on 0.1° cells (one point per farm, in
+effect) Ontario's wind error fell from 10.3% to 8.7% of capacity. The test
+also lists meters that don't fit their plants (Port Alma's two codes on one
+plant, for example), which are matching problems in `ontario.py`, not
+estimation errors. Alberta's history is what
+`snapshots.py` keeps (now 30 days), so its scores firm up over the month.
+
+```bash
+.venv/bin/python -m pipeline.backtest --days 28   # fetch 4 weeks of Ontario readings and weather, then score
+.venv/bin/python -m pipeline.backtest             # rescore with what's on disk
+```
+
 ## Data
 
 | What | Source | Refresh |
@@ -89,7 +119,7 @@ system, wind is drawn as still streaks.
 | Québec production by source, and flows to neighbours | [Hydro-Québec open data](https://donnees.hydroquebec.com/) | hourly, ~3 h behind |
 | Grid regions | HIFLD Control Areas ([archived on source.coop](https://source.coop/seerai/hifld)) matched to EIA-930 codes; Natural Earth provinces | monthly with plants |
 | Wind at 100 m and cloud cover for the map's weather layers | NOAA [GFS](https://www.nco.ncep.noaa.gov/pmb/products/gfs/) 0.25°, hourly steps, via the NOMADS filter (public domain) | each run fetches only new hours |
-| Hub-height wind and sunshine per 0.5° cell | [Open-Meteo](https://open-meteo.com/) Forecast API (CC BY 4.0; free API is non-commercial) | recent hours plus 24 h of forecast, refreshed every 6 hours |
+| Hub-height wind per 0.1° cell, sunshine per 0.5° cell | [Open-Meteo](https://open-meteo.com/) Forecast API (CC BY 4.0; free API is non-commercial) | recent hours plus 24 h of forecast, refreshed every 8 hours |
 | Transmission lines, US | HIFLD Transmission Lines ([archived on source.coop](https://source.coop/seerai/hifld)), in service or status unknown | monthly with plants (the archive is fixed) |
 | Transmission lines, Canada | [OpenStreetMap](https://www.openstreetmap.org/copyright) `power=line` via Overpass (ODbL); NRCan's CanVec lines have no voltage | monthly with plants |
 | Basemap | [OpenFreeMap](https://openfreemap.org) Positron | — |
@@ -152,10 +182,11 @@ once EIA publishes hours the history covers.
 - `pipeline/snapshots.py`, `pipeline/alberta.py`: AESO, NS Power, NB Power and SaskPower readings kept as hourly history; AESO assets matched to plants
 - `pipeline/live.py`: the ISOs' (and BPA's) fuel mix for yesterday and today → `data/live_generation.csv`, averaged into end-of-hour MW (about 2 minutes, mostly SPP)
 - `pipeline/generation.py`: EIA-930, plus calibrated live ISO hours after EIA ends → `data/ba_generation.csv`, the last 48 hours by region and fuel
-- `pipeline/weather.py`: Open-Meteo → `data/weather.csv`, hourly wind at ~100 m and sunshine for each 0.5° cell with plants (~1,600 cells, about 3 minutes; the free tier allows 10,000 locations a day)
+- `pipeline/weather.py`: Open-Meteo → `data/weather.csv`, hourly wind at ~100 m for each 0.1° cell with wind farms and sunshine for each 0.5° cell with solar farms (~2,700 locations, about 6 minutes). The free tier allows 10,000 calls a day, so it refreshes every 8 hours; `data/weather_calls.json` logs each day's calls, and a fetch that would go over is skipped (the last weather is reused)
 - `pipeline/curves.py`: turns local weather into each plant's expected capacity factor
 - `pipeline/allocate.py`: splits each region's hourly total among its plants, weighted by those capacity factors → `web/data/generation.json`
 - `pipeline/gfs.py`: NOAA GFS → `web/data/weather/` (all hours' wind in one `wind.png`, a Web Mercator cloud PNG per hour, `meta.json`); GDAL reads and reprojects the GRIB files
+- `pipeline/backtest.py`: scores the split against Ontario's and Alberta's metered farms → `data/backtest/units.csv` (not part of the hourly run)
 - `pipeline/run.py`: runs them all; re-downloads plants when they're more than 30 days old (`--refresh-plants` to force)
 
 Region codes that differ between the two EIA datasets are mapped in

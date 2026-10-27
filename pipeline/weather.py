@@ -1,7 +1,7 @@
 """Hourly hub-height wind and sunshine at each wind and solar plant, from Open-Meteo.
 
-Plants are grouped into WEATHER_CELL_DEG grid cells and each cell is fetched
-once. Hours line up with EIA-930's end-of-hour labels:
+Plants are grouped into grid cells (WEATHER_CELL_DEG: 0.1° for wind, 0.5° for
+solar) and each cell is fetched once. Hours line up with EIA-930's end-of-hour labels:
   wind_ms – mean of the 80 m and 120 m speeds (≈100 m, a typical modern hub
             height), averaged over the hour ending at `utc`
   ghi     – global horizontal irradiance, W/m², which Open-Meteo already
@@ -11,11 +11,14 @@ This uses the Forecast API, which serves recent past hours with no delay; the
 Historical Weather API's ERA5 data runs about 5 days behind real time.
 
 Output: data/weather.csv with columns cell, utc, wind_ms, ghi, running from the
-start of the EIA window to FORECAST_AHEAD past now.
+start of the EIA window to FORECAST_AHEAD past now. Every fetch is logged per UTC
+day in data/weather_calls.json, and one that would pass the free tier's daily calls
+is refused (the map then reuses the last weather it has).
 Open-Meteo data is CC BY 4.0; the free API is for non-commercial use.
 """
 
 import json
+import math
 import time
 
 import numpy as np
@@ -23,7 +26,8 @@ import pandas as pd
 import requests
 
 from .common import (
-    BA_GENERATION_CSV, PLANTS_GEOJSON, USER_AGENT, WEATHER_CELL_DEG, WEATHER_CSV, WEATHER_MAX_AGE_HOURS,
+    BA_GENERATION_CSV, PLANTS_GEOJSON, USER_AGENT, WEATHER_CELL_DEG, WEATHER_CSV, WEATHER_DAILY_CALLS,
+    WEATHER_MAX_AGE_HOURS,
 )
 
 API_URL = "https://api.open-meteo.com/v1/forecast"
@@ -32,7 +36,7 @@ LOCATIONS_PER_MINUTE = 500  # stay under the free tier's 600/minute
 WEATHER_FUELS = ("wind", "solar")
 # Cache this much forecast beyond now. EIA hours that arrive before the next
 # refresh are then already covered, so hourly runs cost no calls; refreshing
-# every WEATHER_MAX_AGE_HOURS (6) uses ~4 × 1,600 of the 10,000 daily calls.
+# every WEATHER_MAX_AGE_HOURS (8) uses at most 3 × ~2,700 of the 10,000 daily calls.
 FORECAST_AHEAD = pd.Timedelta(hours=24)
 # Also cache this much before the EIA window, so a window that starts a few hours
 # earlier next run (EIA's lag varies) doesn't force a refetch. It costs nothing:
@@ -40,19 +44,40 @@ FORECAST_AHEAD = pd.Timedelta(hours=24)
 LEAD_IN = pd.Timedelta(hours=24)
 
 
-def cell_of(lat, lon):
-    step = WEATHER_CELL_DEG
+CALLS_JSON = WEATHER_CSV.parent / "weather_calls.json"
+
+
+def cell_of(lat, lon, step):
     return f"{round(lat / step) * step:.2f},{round(lon / step) * step:.2f}"
 
 
 def plant_cells():
-    """{plant id: cell key} for every wind and solar plant."""
+    """{plant id: cell key} for every wind and solar plant. A wind cell and a solar cell
+    with the same centre share a key, and so one fetched location."""
     features = json.loads(PLANTS_GEOJSON.read_text())["features"]
     return {
-        f["properties"]["id"]: cell_of(f["geometry"]["coordinates"][1], f["geometry"]["coordinates"][0])
+        f["properties"]["id"]: cell_of(f["geometry"]["coordinates"][1], f["geometry"]["coordinates"][0],
+                                       WEATHER_CELL_DEG[f["properties"]["fuel"]])
         for f in features
         if f["properties"]["fuel"] in WEATHER_FUELS
     }
+
+
+def calls_per_location(start, end):
+    """Open-Meteo counts a location as one call per two weeks of data asked for."""
+    return math.ceil(((end.normalize() - start.normalize()).days + 1) / 14)
+
+
+def calls_today():
+    log = json.loads(CALLS_JSON.read_text()) if CALLS_JSON.exists() else {}
+    return log.get(f"{pd.Timestamp.now(tz='UTC'):%Y-%m-%d}", 0)
+
+
+def _record_calls(n):
+    log = json.loads(CALLS_JSON.read_text()) if CALLS_JSON.exists() else {}
+    today = f"{pd.Timestamp.now(tz='UTC'):%Y-%m-%d}"
+    log[today] = log.get(today, 0) + n
+    CALLS_JSON.write_text(json.dumps(dict(sorted(log.items())[-14:]), indent=1))
 
 
 def _get(params, tries=4):
@@ -68,6 +93,11 @@ def _get(params, tries=4):
 
 def fetch(cells, start, end):
     """Hourly weather for each cell between two UTC timestamps (inclusive)."""
+    per_location = calls_per_location(start, end)
+    used, need = calls_today(), len(cells) * per_location
+    if used + need > WEATHER_DAILY_CALLS:
+        raise RuntimeError(f"{need:,} Open-Meteo calls would make {used + need:,} today, "
+                           f"over the free {WEATHER_DAILY_CALLS:,}")
     frames = []
     seconds_per_batch = 60 * BATCH / LOCATIONS_PER_MINUTE
     for i in range(0, len(cells), BATCH):
@@ -84,6 +114,7 @@ def fetch(cells, start, end):
             "start_date": start.strftime("%Y-%m-%d"),
             "end_date": end.strftime("%Y-%m-%d"),
         })
+        _record_calls(len(batch) * per_location)
         for cell, res in zip(batch, results):
             h = res["hourly"]
             frames.append(pd.DataFrame({
@@ -124,8 +155,8 @@ def build(force=False):
         print(f"Weather: reusing {WEATHER_CSV.name} ({len(cells):,} cells)")
         return df
 
-    print(f"Weather: fetching {len(cells):,} cells from Open-Meteo "
-          f"(~{len(cells) / LOCATIONS_PER_MINUTE:.0f} min, {len(cells):,} of 10,000 daily free calls)")
+    print(f"Weather: fetching {len(cells):,} cells from Open-Meteo (~{len(cells) / LOCATIONS_PER_MINUTE:.0f} min; "
+          f"{calls_today():,} of the {WEATHER_DAILY_CALLS:,} free calls already used today, UTC)")
     now = pd.Timestamp.now(tz="UTC").floor("h")
     start = hours[0] - LEAD_IN
     df = fetch(cells, start, max(hours[-1], now) + FORECAST_AHEAD)

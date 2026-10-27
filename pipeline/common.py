@@ -23,11 +23,15 @@ PLANT_GENERATION_JSON = WEB_DATA / "generation.json"
 HOURS = 48
 
 # Weather is fetched once per grid cell, not per plant. Open-Meteo's free tier
-# counts every location as a call (600/minute, 10,000/day): 0.5° cells cover
-# the ~9,000 wind and solar plants with ~1,600 locations.
-WEATHER_CELL_DEG = 0.5
-# Reuse fetched weather for this long before asking Open-Meteo again.
-WEATHER_MAX_AGE_HOURS = 6
+# counts every location as a call (600/minute, 10,000/day). Wind gets 0.1° cells,
+# about one per farm: in backtest.py, 0.5° cells left Ontario's wind split with
+# 15% more error (10.8% of capacity against 9.4%). Solar stays on 0.5°, where its
+# ~7,800 farms need ~1,400 cells (0.1° would take ~4,400). ~2,700 locations in all.
+WEATHER_CELL_DEG = {"wind": 0.1, "solar": 0.5}
+# Reuse fetched weather for this long before asking Open-Meteo again: at most three
+# fetches a day, ~8,100 calls, leaves room for backtest.py under the 10,000.
+WEATHER_MAX_AGE_HOURS = 8
+WEATHER_DAILY_CALLS = 10_000
 
 USER_AGENT = "Mozilla/5.0 (na-renewables-map prototype)"
 
