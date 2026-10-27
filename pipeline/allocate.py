@@ -95,12 +95,18 @@ def load_metered(hours):
 
 
 def aligned_flows(hours):
-    """{neighbour: [MW out of Québec, or null]} on the map's hours."""
+    """[{from, to, source, mw: [MW from→to, or null per hour]}] on the map's hours."""
     if not FLOWS_CSV.exists():
-        return {}
-    f = pd.read_csv(FLOWS_CSV, parse_dates=["utc"]).pivot_table(index="utc", columns="neighbour", values="mw")
-    f = f.reindex(pd.DatetimeIndex(hours))
-    return {n: [compact(v) for v in f[n].to_numpy()] for n in f.columns}
+        return []
+    f = pd.read_csv(FLOWS_CSV, parse_dates=["utc"])
+    if "link" not in f:
+        return []  # written by an older version of the pipeline
+    out = []
+    for (link, source), g in f.groupby(["link", "source"]):
+        series = g.groupby("utc")["mw"].mean().reindex(pd.DatetimeIndex(hours))
+        start, end = link.split("→")
+        out.append({"from": start, "to": end, "source": source, "mw": [compact(v) for v in series.to_numpy()]})
+    return out
 
 
 def ba_totals(totals):

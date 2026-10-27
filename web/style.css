@@ -5,10 +5,41 @@
   --muted: #667085;
   --line: #e4e7ec;
   --accent: #1c2430;
-  --wind: #1f9e89;
-  --solar: #e9a800;
-  --hydro: #3a6fd8;
-  --geothermal: #c2410c;
+  --surface: #ffffff;
+  --hover: #f6f7f9;
+  --notice-bg: #fff7e6;
+  --notice-line: #f5d38a;
+  color-scheme: light;
+}
+
+/* Dark: the system setting under "Auto", or chosen explicitly. Keep both blocks in step. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c0c0c;
+    --panel: #12161c;
+    --text: #e6edf3;
+    --muted: #8b97a6;
+    --line: #273140;
+    --accent: #c4b5fd;
+    --surface: #1a2029;
+    --hover: #1f2732;
+    --notice-bg: #2a2414;
+    --notice-line: #6b5a2b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c0c0c;
+  --panel: #12161c;
+  --text: #e6edf3;
+  --muted: #8b97a6;
+  --line: #273140;
+  --accent: #c4b5fd;
+  --surface: #1a2029;
+  --hover: #1f2732;
+  --notice-bg: #2a2414;
+  --notice-line: #6b5a2b;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -37,6 +68,8 @@ body {
 #map { height: 100%; }
 
 h1 { font-size: 22px; line-height: 1.15; margin: 0 0 6px; }
+.title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+#theme { flex: none; font-size: 12px; padding: 4px 8px; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
 .sub { margin: 0; color: var(--muted); }
 section { margin-top: 18px; }
@@ -51,11 +84,11 @@ button {
   padding: 5px 10px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
   color: var(--text);
   cursor: pointer;
 }
-button:hover { background: #f6f7f9; }
+button:hover { background: var(--hover); }
 #slider { width: 100%; margin-top: 10px; accent-color: var(--accent); }
 #coverage { margin: 6px 0 0; }
 #coverage:empty { display: none; }
@@ -74,7 +107,7 @@ th, td { padding: 5px 4px; border-bottom: 1px solid var(--line); }
 #top th:nth-child(3) { width: 58px; }
 #top th:nth-child(4) { width: 52px; }
 #top tbody tr { cursor: pointer; }
-#top tbody tr:hover { background: #f6f7f9; }
+#top tbody tr:hover { background: var(--hover); }
 #top td:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .tag {
@@ -95,8 +128,8 @@ th, td { padding: 5px 4px; border-bottom: 1px solid var(--line); }
 #notice {
   padding: 10px 12px;
   border-radius: 6px;
-  background: #fff7e6;
-  border: 1px solid #f5d38a;
+  background: var(--notice-bg);
+  border: 1px solid var(--notice-line);
 }
 
 footer { margin-top: 18px; }
@@ -115,3 +148,27 @@ footer a { color: inherit; }
   #map { grid-row: 1; height: 55vh; }
   #panel { grid-row: 2; border-right: 0; border-top: 1px solid var(--line); padding: 16px; }
 }
+
+/* MapLibre's popups and controls, in the page's colours. */
+.maplibregl-popup-content { background: var(--panel); color: var(--text); }
+.maplibregl-popup-close-button { color: var(--muted); }
+.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--panel); }
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--panel); }
+.maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--panel); }
+.maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--panel); }
+.maplibregl-ctrl-group, .maplibregl-ctrl-attrib, .maplibregl-ctrl-attrib.maplibregl-compact { background: var(--surface); color: var(--text); }
+.maplibregl-ctrl-attrib a { color: var(--text); }
+.maplibregl-ctrl-group button + button { border-top-color: var(--line); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .maplibregl-ctrl-icon,
+  :root:not([data-theme="light"]) .maplibregl-ctrl-attrib-button { filter: invert(1); }
+}
+:root[data-theme="dark"] .maplibregl-ctrl-icon,
+:root[data-theme="dark"] .maplibregl-ctrl-attrib-button { filter: invert(1); }
+
+/* Wind particles sit above the map but never take its clicks. */
+#wind-canvas { position: absolute; inset: 0; pointer-events: none; }

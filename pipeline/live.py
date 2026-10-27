@@ -1,4 +1,4 @@
-"""Live fuel mix from six ISOs and BPA, averaged into hourly totals per BA.
+"""Live fuel mix from the ISOs and BPA, averaged into hourly totals per BA.
 
 EIA-930 generation has run up to a day behind, but the ISOs post their own fuel
 mix every 5 minutes. This fetches yesterday and today (ISO local time) through
@@ -9,9 +9,10 @@ A feed's boundaries and categories don't always match EIA-930's (SPP's feed
 includes its western RTO, which EIA reports as SWPW), so generation.py
 calibrates each feed against EIA over the hours both cover before using it.
 
-PJM isn't here on purpose: its feed comes from Data Miner, whose terms forbid
-publishing data from it, or derived from it, without PJM membership. PJM stays
-on EIA-930. Output: data/live_generation.csv with columns utc, iso, fuel, mw.
+PJM's feed comes from Data Miner and needs PJM_API_KEY in .env; without it PJM
+stays on EIA-930. Data Miner's terms: a non-member key is for internal use only,
+and publishing data from it, or derived from it, needs PJM membership.
+Output: data/live_generation.csv with columns utc, iso, fuel, mw.
 """
 
 import datetime as dt
@@ -21,7 +22,7 @@ import warnings
 
 import pandas as pd
 
-from .common import LIVE_GENERATION_CSV, USER_AGENT
+from .common import LIVE_GENERATION_CSV, USER_AGENT, env_value
 
 # ISO -> (gridstatus class, EIA BAs the feed covers, {our fuel: ISO columns to add up}).
 # A fuel left out here stays on EIA for those BAs.
@@ -41,6 +42,8 @@ ISOS = {
     # Not an ISO, but Bonneville posts its own 5-minute data. "VER" is wind plus
     # solar; it's calibrated against EIA's BPAT wind, BPA's solar being small.
     "BPA": ("BPA", ["BPAT"], {"wind": ["VER"], "hydro": ["Hydro"]}),
+    # Hourly, and only with PJM_API_KEY (see the module notes on Data Miner's terms).
+    "PJM": ("PJM", ["PJM"], {"wind": ["Wind"], "solar": ["Solar"], "hydro": ["Hydro"]}),
 }
 
 # An hour needs at least this many readings to count; ISO-NE posts irregularly.
@@ -79,6 +82,9 @@ def _iso(cls_name):
 
     import gridstatus as gs  # imported here so the rest of the pipeline works without it
 
+    if cls_name == "PJM":
+        key = env_value("PJM_API_KEY")
+        return gs.PJM(api_key=key) if key else None
     return getattr(gs, cls_name)()
 
 
@@ -92,6 +98,9 @@ def hourly(df, columns):
     unique = ~stamp.duplicated(keep="last")
     df, stamp = df[unique], stamp[unique]
     hour = stamp.dt.ceil("h")
+    # Hourly feeds (PJM) have one reading an hour; ask for several only from faster ones.
+    spacing = stamp.sort_values().diff().median()
+    min_readings = 1 if pd.notna(spacing) and spacing >= pd.Timedelta(minutes=45) else MIN_READINGS_PER_HOUR
     rows = []
     for fuel, cols in columns.items():
         present = [c for c in cols if c in df]
@@ -102,13 +111,15 @@ def hourly(df, columns):
         # The current hour is still filling up; keep only hours the feed has passed.
         # Judged by readings with values: BPA's file carries empty rows for later today.
         last_reading = stamp[mw.notna()].max()
-        g = g[(g["size"] >= MIN_READINGS_PER_HOUR) & (g.index <= last_reading)]
+        g = g[(g["size"] >= min_readings) & (g.index <= last_reading)]
         rows.append(pd.DataFrame({"utc": g.index, "fuel": fuel, "mw": g["mean"].to_numpy()}))
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["utc", "fuel", "mw"])
 
 
 def fetch_iso(name, cls_name, columns):
     iso = _iso(cls_name)
+    if iso is None:
+        return None, "skipped (no PJM_API_KEY)"
     today = pd.Timestamp.now(tz=iso.default_timezone).date()
     frames, notes = [], []
     for day in (today - dt.timedelta(days=1), "today"):

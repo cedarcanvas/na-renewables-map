@@ -24,15 +24,47 @@ const radius = (mw) => [
   11, ["*", 4, ["sqrt", mw]],
 ];
 const fuelColor = ["match", ["get", "fuel"], ...Object.entries(FUELS).flatMap(([k, f]) => [k, f.color]), "#888"];
-// Plants whose region has no data for the selected hour (mw = -1) are drawn grey.
-const NO_DATA = "#9aa3ad";
-const ringColor = ["case", ["<", ["get", "mw"], 0], NO_DATA, fuelColor];
 // Below this share of a fuel's capacity reporting, its total is marked partial.
 const PARTIAL = 0.9;
 
+// --- Theme ----------------------------------------------------------------------
+// "auto" follows the system setting; a choice of light or dark is remembered per browser.
+const BASEMAPS = {
+  light: "https://tiles.openfreemap.org/styles/positron",
+  dark: "https://tiles.openfreemap.org/styles/dark",
+};
+const THEME_COLORS = {
+  light: {
+    region: "#6d28d9", regionCasing: "#ffffff", regionLabel: "#5b21b6", halo: "#ffffff", hover: "#7c3aed",
+    noData: "#9aa3ad", particles: [30, 41, 59], cloudBrightness: [0, 0.75],
+    flowLabel: [40, 60, 110, 255], flowHalo: [255, 255, 255, 230],
+  },
+  dark: {
+    region: "#a78bfa", regionCasing: "#0c0c0c", regionLabel: "#c4b5fd", halo: "#0c0c0c", hover: "#a78bfa",
+    noData: "#5b6573", particles: [226, 232, 240], cloudBrightness: [0.3, 0.85],
+    flowLabel: [191, 219, 254, 255], flowHalo: [12, 12, 12, 230],
+  },
+};
+const THEME_CHOICES = ["auto", "light", "dark"];
+let themeChoice = "auto";
+try {
+  themeChoice = THEME_CHOICES.includes(localStorage.getItem("theme")) ? localStorage.getItem("theme") : "auto";
+} catch {}
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+const resolvedTheme = () => (themeChoice === "auto" ? (systemDark.matches ? "dark" : "light") : themeChoice);
+const colors = () => THEME_COLORS[resolvedTheme()];
+// Plants whose region has no data for the selected hour (mw = -1) are drawn grey.
+const ringColor = () => ["case", ["<", ["get", "mw"], 0], colors().noData, fuelColor];
+
+function markTheme() {
+  if (themeChoice === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = themeChoice;
+  $("#theme").textContent = `◐ ${themeChoice[0].toUpperCase()}${themeChoice.slice(1)}`;
+}
+
 const map = new maplibregl.Map({
   container: "map",
-  style: "https://tiles.openfreemap.org/styles/positron",
+  style: BASEMAPS[resolvedTheme()],
   bounds: [[-125, 24.5], [-63, 50.5]], // lower 48 and southern Canada; a URL hash overrides this
   fitBoundsOptions: { padding: 20 },
   hash: true,
@@ -42,6 +74,50 @@ map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top
 // Captured now: with a cached style, "load" can fire before our data has downloaded.
 const mapLoaded = new Promise((resolve) => map.once("load", resolve));
 
+// Our sources; everything else in the style belongs to the basemap.
+const OWN_SOURCES = new Set(["plants", "regions", "clouds"]);
+
+function setTheme(choice) {
+  themeChoice = choice;
+  try {
+    localStorage.setItem("theme", choice);
+  } catch {}
+  markTheme();
+  applyBasemap();
+}
+
+// Swap basemaps, carrying our own sources and layers across, then recolour them.
+let currentBasemap = BASEMAPS[resolvedTheme()];
+
+function applyBasemap() {
+  const url = BASEMAPS[resolvedTheme()];
+  if (url === currentBasemap) return applyThemeColors();
+  currentBasemap = url;
+  map.setStyle(url, {
+    transformStyle: (prev, next) => ({
+      ...next,
+      sources: { ...next.sources, ...Object.fromEntries(Object.entries(prev?.sources ?? {}).filter(([id]) => OWN_SOURCES.has(id))) },
+      layers: [...next.layers, ...(prev?.layers ?? []).filter((l) => OWN_SOURCES.has(l.source))],
+    }),
+  });
+  map.once("style.load", applyThemeColors);
+}
+
+function applyThemeColors() {
+  const c = colors();
+  const paint = (layer, prop, value) => map.getLayer(layer) && map.setPaintProperty(layer, prop, value);
+  paint("region-fill", "fill-color", c.hover);
+  paint("region-casing", "line-color", c.regionCasing);
+  paint("region-lines", "line-color", c.region);
+  paint("region-labels", "text-color", c.regionLabel);
+  paint("region-labels", "text-halo-color", c.halo);
+  paint("capacity", "circle-color", ringColor());
+  paint("capacity", "circle-stroke-color", ringColor());
+  paint("clouds", "raster-brightness-min", c.cloudBrightness[0]);
+  paint("clouds", "raster-brightness-max", c.cloudBrightness[1]);
+  updateFlows();
+}
+
 async function loadJSON(url) {
   const r = await fetch(url, { cache: "no-cache" });
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
@@ -49,6 +125,11 @@ async function loadJSON(url) {
 }
 
 async function init() {
+  markTheme();
+  $("#theme").addEventListener("click", () =>
+    setTheme(THEME_CHOICES[(THEME_CHOICES.indexOf(themeChoice) + 1) % THEME_CHOICES.length]));
+  systemDark.addEventListener("change", () => themeChoice === "auto" && applyBasemap());
+
   state.plants = await loadJSON("data/plants.geojson");
   try {
     state.gen = await loadJSON("data/generation.json");
@@ -86,22 +167,33 @@ async function init() {
   await addRegionLayers(); // first, so the plant circles draw on top
   addPlantLayers();
   addFlowOverlay();
+  await addWeatherLayers();
 }
 
-// --- Québec's flows to its neighbours (deck.gl arcs) -------------------------------
+// --- Cross-border flows (deck.gl arcs) ---------------------------------------------
 
 // Representative points, not the actual converter stations or line routes.
-const QUEBEC = [-73.57, 45.5]; // Montréal
-const NEIGHBOURS = {
+const PLACES = {
+  "Québec": [-73.57, 45.5],           // Montréal
   "New England": [-71.6, 42.6],
   "New York": [-75.0, 42.9],
-  Ontario: [-75.7, 45.42],
-  "New Brunswick": [-66.64, 45.96],
+  Ontario: [-75.7, 45.42],            // Ottawa
+  "New Brunswick": [-66.64, 45.96],   // Fredericton
+  "Nova Scotia": [-63.58, 44.65],     // Halifax
+  PEI: [-63.13, 46.24],               // Charlottetown
+  "Northern Maine": [-68.02, 46.68],  // Presque Isle
+  Newfoundland: [-57.95, 48.95],      // Corner Brook, near the Maritime Link's landing
+};
+// What each source's numbers are, for the tooltip.
+const FLOW_NOTES = {
+  "Hydro-Québec": "As reported by Hydro-Québec, hourly (includes wheel-through).",
+  "NB Power": "NB Power's net scheduled interchange (scheduled, not metered).",
+  "NS Power": "NS Power's 2-minute reading, taken just after the hour.",
 };
 let flowOverlay = null;
 
 function addFlowOverlay() {
-  if (typeof deck === "undefined" || !state.gen?.flows || !Object.keys(state.gen.flows).length) {
+  if (typeof deck === "undefined" || !state.gen?.flows?.length) {
     $("#show-flows").closest("label").hidden = true;
     return;
   }
@@ -111,8 +203,8 @@ function addFlowOverlay() {
     interleaved: false,
     layers: flowLayers(),
     getTooltip: ({ object }) => object && {
-      text: `${object.mw >= 0 ? `Québec → ${object.name}` : `${object.name} → Québec`}: ${fmt(Math.abs(object.mw))} MW\n` +
-        "As reported by Hydro-Québec (includes wheel-through).\nEndpoints are approximate.",
+      text: `${object.start} → ${object.end}: ${fmt(Math.abs(object.mw))} MW\n` +
+        `${FLOW_NOTES[object.source] ?? `From ${object.source}.`}\nEndpoints are approximate.`,
     },
   });
   map.addControl(flowOverlay);
@@ -121,17 +213,19 @@ function addFlowOverlay() {
 
 function flowLayers() {
   if (!$("#show-flows").checked) return [];
-  const flows = Object.entries(state.gen.flows)
-    .map(([name, series]) => ({ name, mw: series[state.hour] }))
-    .filter((f) => f.mw != null && Math.abs(f.mw) >= 1 && NEIGHBOURS[f.name]);
-  const ends = (f) => (f.mw >= 0 ? [QUEBEC, NEIGHBOURS[f.name]] : [NEIGHBOURS[f.name], QUEBEC]);
+  // Each arc runs the way the power flows, whichever way the source reports the link.
+  const flows = (state.gen.flows ?? [])
+    .map((f) => ({ ...f, mw: f.mw[state.hour] }))
+    .filter((f) => f.mw != null && Math.abs(f.mw) >= 1 && PLACES[f.from] && PLACES[f.to])
+    .map((f) => ({ ...f, start: f.mw >= 0 ? f.from : f.to, end: f.mw >= 0 ? f.to : f.from }));
+  const midpoint = (f) => PLACES[f.start].map((v, i) => (v + PLACES[f.end][i]) / 2);
   return [
     new deck.ArcLayer({
-      id: "quebec-flows",
+      id: "flows",
       data: flows,
-      getSourcePosition: (f) => ends(f)[0],
-      getTargetPosition: (f) => ends(f)[1],
-      getSourceColor: [58, 111, 216, 230], // hydro blue at the sending end
+      getSourcePosition: (f) => PLACES[f.start],
+      getTargetPosition: (f) => PLACES[f.end],
+      getSourceColor: [58, 111, 216, 230], // strongest at the sending end
       getTargetColor: [58, 111, 216, 90],
       getWidth: (f) => Math.max(1.5, Math.abs(f.mw) / 150),
       widthUnits: "pixels",
@@ -140,20 +234,21 @@ function flowLayers() {
       updateTriggers: { getSourcePosition: state.hour, getTargetPosition: state.hour, getWidth: state.hour },
     }),
     new deck.TextLayer({
-      id: "quebec-flow-labels",
+      id: "flow-labels",
+      // Several arcs end in New England, so each label sits at its arc's midpoint.
       data: flows,
-      getPosition: (f) => NEIGHBOURS[f.name],
-      getText: (f) => `${fmt(Math.abs(f.mw))} MW ${f.mw >= 0 ? "from" : "to"} Québec`,
+      getPosition: midpoint,
+      getText: (f) => `${fmt(Math.abs(f.mw))} MW`,
       getSize: 12,
-      getColor: [40, 60, 110, 255],
-      getPixelOffset: [0, -26], // clear of the basemap's city label
+      getColor: colors().flowLabel,
+      getPixelOffset: [0, -10],
       fontFamily: "system-ui, -apple-system, sans-serif",
       fontWeight: 600,
       outlineWidth: 3,
-      outlineColor: [255, 255, 255, 230],
+      outlineColor: colors().flowHalo,
       fontSettings: { sdf: true },
-      characterSet: "auto", // the default is ASCII only, which drops the é in Québec
-      updateTriggers: { getText: state.hour },
+      characterSet: "auto", // the default is ASCII only, which drops accented letters
+      updateTriggers: { getText: state.hour, getPosition: state.hour },
     }),
   ];
 }
@@ -164,47 +259,66 @@ function updateFlows() {
 
 // --- Grid regions -------------------------------------------------------------
 
-const REGION_LAYERS = ["region-fill", "region-lines", "region-labels"];
+const REGION_LAYERS = ["region-fill", "region-casing", "region-lines", "region-labels"];
+let hoveredRegion = null;
 
 async function addRegionLayers() {
   let regions;
   try {
     regions = await loadJSON("data/regions.geojson");
   } catch {
-    $(".layers").hidden = true; // not built yet: python -m pipeline.regions
+    $("#show-regions").closest("label").hidden = true; // not built yet: python -m pipeline.regions
     return;
   }
-  const polygons = ["==", ["geometry-type"], "Polygon"];
-  const multi = ["==", ["geometry-type"], "MultiPolygon"];
-  map.addSource("regions", { type: "geojson", data: regions });
-  // Invisible fill, there only so a click inside a region can be detected.
-  map.addLayer({ id: "region-fill", type: "fill", source: "regions", filter: ["any", polygons, multi],
-    paint: { "fill-opacity": 0 } });
-  map.addLayer({
-    id: "region-lines", type: "line", source: "regions", filter: ["any", polygons, multi],
+  const areas = ["in", ["geometry-type"], ["literal", ["Polygon", "MultiPolygon"]]];
+  const c = colors();
+  // promoteId lets a region (outline and label point share a code) carry hover state.
+  map.addSource("regions", { type: "geojson", data: regions, promoteId: "code" });
+  // A faint tint under the cursor; otherwise invisible, but still there for clicks.
+  map.addLayer({ id: "region-fill", type: "fill", source: "regions", filter: areas,
     paint: {
-      "line-color": "#7b8794",
-      "line-opacity": 0.7,
-      "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.6, 8, 1.4],
-      "line-dasharray": [3, 2],
+      "fill-color": c.hover,
+      "fill-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 0.1, 0],
+    } });
+  // A casing in the basemap's own colour keeps the line legible over roads and borders.
+  map.addLayer({
+    id: "region-casing", type: "line", source: "regions", filter: areas,
+    layout: { "line-join": "round" },
+    paint: {
+      "line-color": c.regionCasing,
+      "line-opacity": 0.85,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 3, 2.6, 8, 4.4],
+    },
+  });
+  map.addLayer({
+    id: "region-lines", type: "line", source: "regions", filter: areas,
+    layout: { "line-join": "round" },
+    paint: {
+      "line-color": c.region,
+      "line-opacity": ["case", ["boolean", ["feature-state", "hover"], false], 1, 0.75],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 3,
+        ["case", ["boolean", ["feature-state", "hover"], false], 2.2, 1.1], 8,
+        ["case", ["boolean", ["feature-state", "hover"], false], 3.6, 2.2]],
     },
   });
   map.addLayer({
     id: "region-labels", type: "symbol", source: "regions", filter: ["==", ["geometry-type"], "Point"],
     layout: {
       "text-field": ["get", "short"],
-      "text-font": ["Noto Sans Regular"],
-      "text-size": ["interpolate", ["linear"], ["zoom"], 3, 9, 7, 12],
+      "text-font": ["Noto Sans Bold"],
+      "text-size": ["interpolate", ["linear"], ["zoom"], 3, 10, 7, 14],
       "text-transform": "uppercase",
       "text-letter-spacing": 0.08,
       "text-max-width": 8,
     },
-    paint: { "text-color": "#5b6675", "text-halo-color": "#ffffff", "text-halo-width": 1.5 },
+    paint: { "text-color": c.regionLabel, "text-halo-color": c.halo, "text-halo-width": 2 },
   });
 
   $("#show-regions").addEventListener("change", (e) => {
     for (const id of REGION_LAYERS) map.setLayoutProperty(id, "visibility", e.target.checked ? "visible" : "none");
   });
+  map.on("mousemove", "region-fill", (e) => setHoveredRegion(e.features[0]?.properties.code));
+  map.on("mouseleave", "region-fill", () => setHoveredRegion(null));
   map.on("click", "region-fill", (e) => {
     // A click on a plant opens the plant's popup instead.
     if (map.queryRenderedFeatures(e.point, { layers: ["capacity"] }).length) return;
@@ -215,6 +329,13 @@ async function addRegionLayers() {
       .setHTML(`<div class="popup">${hits.map(regionSummary).join("")}</div>`)
       .addTo(map);
   });
+}
+
+function setHoveredRegion(code) {
+  if (code === hoveredRegion) return;
+  if (hoveredRegion) map.setFeatureState({ source: "regions", id: hoveredRegion }, { hover: false });
+  hoveredRegion = code ?? null;
+  if (hoveredRegion) map.setFeatureState({ source: "regions", id: hoveredRegion }, { hover: true });
 }
 
 function regionSummary(r) {
@@ -255,9 +376,9 @@ function addPlantLayers() {
     layout: { "circle-sort-key": ["-", ["get", "cap"]] },
     paint: {
       "circle-radius": radius(["get", "cap"]),
-      "circle-color": ringColor,
+      "circle-color": ringColor(),
       "circle-opacity": 0.08,
-      "circle-stroke-color": ringColor,
+      "circle-stroke-color": ringColor(),
       "circle-stroke-opacity": 0.55,
       "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 9, 1.2],
     },
@@ -306,6 +427,7 @@ function setHour(i) {
   $("#slider").value = i;
   map.getSource("plants")?.setData(featuresForHour());
   updateFlows();
+  updateWeather();
   renderPanel();
 }
 
@@ -370,9 +492,11 @@ function renderPanel() {
     const covered = coveredCap(fuel, caps);
     const partial = covered < PARTIAL * caps[fuel];
     tr.querySelector("[data-cap]").textContent = fmt(caps[fuel] / 1000, 1);
-    tr.querySelector("[data-now]").textContent = now == null ? "–" : fmt(now / 1000, 1) + (partial ? "*" : "");
+    // Solar reads slightly negative at night (inverters draw power); show that as zero.
+    const mw = now == null ? null : Math.max(now, 0);
+    tr.querySelector("[data-now]").textContent = mw == null ? "–" : fmt(mw / 1000, 1) + (partial ? "*" : "");
     // % of the capacity that reported, so a partial hour isn't read as a collapse.
-    tr.querySelector("[data-pct]").textContent = now == null || !covered ? "–" : fmt((100 * now) / covered);
+    tr.querySelector("[data-pct]").textContent = mw == null || !covered ? "–" : fmt((100 * mw) / covered);
   }
   renderCoverage(caps);
 
@@ -400,8 +524,9 @@ function renderCoverage(caps) {
   if (!state.gen) return (el.textContent = "");
   const hour = state.gen.hours[state.hour];
   const { now: feeds, behind } = liveFeedsNow();
+  const list = (items) => new Intl.ListFormat("en", { type: "conjunction" }).format(items);
   const lagging = behind.length
-    ? ` ${behind.join(" and ")} ${behind.length > 1 ? "haven't" : "hasn't"} reached this hour yet.`
+    ? ` ${list(behind)} ${behind.length > 1 ? "haven't" : "hasn't"} reached this hour yet.`
     : "";
   let text;
   if (!feeds.length && !behind.length) text = "Source: EIA-930.";
@@ -440,10 +565,11 @@ function renderSources() {
     weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short",
   });
   $("#sources").innerHTML = `${updated ? `<strong>Updated ${updated}.</strong> ` : ""}
-    Plants: <a href="https://www.eia.gov/electricity/data/eia860m/">EIA-860M</a> (${plantsSrc}).
+    Plants: <a href="https://www.eia.gov/electricity/data/eia860m/">EIA-860M</a> (${plantsSrc}); Canada: NRCan,
+    NACEI, and <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> (ODbL) for Alberta's solar.
     Generation: <a href="https://www.eia.gov/electricity/gridmonitor/">EIA-930</a>${g ? ` via ${g.generation_source}` : ""}.
-    ${Object.keys(g?.live ?? {}).length ? `Live fuel mix: ${[...new Set(Object.values(g.live).map((l) => l.feed))].join(", ")},
-      via <a href="https://github.com/gridstatus/gridstatus">gridstatus</a>.` : ""}
+    ${Object.keys(g?.live ?? {}).length ? `Live data from the operators: ${[...new Set(Object.values(g.live).map((l) => l.feed))].join(", ")}
+      (the US ISOs via <a href="https://github.com/gridstatus/gridstatus">gridstatus</a>); flows also from NB Power.` : ""}
     ${g?.weighting === "weather" ? `Weather: <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY 4.0).` : ""}
     Grid regions: HIFLD Control Areas (archived on <a href="https://source.coop/seerai/hifld">source.coop</a>),
     <a href="https://www.naturalearthdata.com/">Natural Earth</a>.
@@ -493,7 +619,10 @@ function showPopup(id) {
     .addTo(map);
 }
 
+// The ISOs and BPA post every 5 minutes; Hydro-Québec and IESO post hourly figures;
+// AESO, NS Power and SaskPower show only the current moment, read just after each hour.
 const HOURLY_FEEDS = new Set(["Hydro-Québec", "IESO"]);
+const SNAPSHOT_FEEDS = new Set(["AESO", "NS Power", "SaskPower"]);
 
 function popupNote(p, mw, weighted) {
   const region = p.ba || "its region";
@@ -501,11 +630,15 @@ function popupNote(p, mw, weighted) {
   if (mw == null && live && state.gen.hours[state.hour] > live.until)
     return `No data for this hour yet: ${live.feed}'s live feed runs a little behind the others.`;
   if (mw == null) return `No data for this hour yet: ${region}'s figures haven't been published.`;
-  if (state.gen.metered?.includes(p.id))
-    return `Metered: ${live?.feed ?? region}'s hourly reading for this plant (shared by capacity where one meter covers several plants).`;
+  if (state.gen.metered?.includes(p.id)) {
+    const reading = SNAPSHOT_FEEDS.has(live?.feed) ? "reading for this plant, taken just after the hour"
+      : "hourly reading for this plant";
+    return `Metered: ${live?.feed ?? region}'s ${reading} (shared by capacity where one meter covers several plants).`;
+  }
   const fromLive = live && state.gen.hours[state.hour] >= live.from;
-  // The ISOs and BPA post every 5 minutes; Hydro-Québec and IESO post hourly figures.
   const source = !fromLive ? `${region}'s ${p.fuel} total reported to EIA`
+    : live.feed === "SaskPower" ? `SaskPower's latest published ${p.fuel} figure (a summary of the previous day)`
+    : SNAPSHOT_FEEDS.has(live.feed) ? `${live.feed}'s ${p.fuel} reading, taken just after the hour`
     : HOURLY_FEEDS.has(live.feed) ? `${live.feed}'s hourly ${p.fuel} figure`
     : `${live.feed}'s live ${p.fuel} feed (5-minute readings averaged over the hour)`;
   const weighting = weighted ? `, weighted by local ${p.fuel === "wind" ? "wind" : "sunshine"}` : "";

@@ -10,9 +10,12 @@
 <body>
   <aside id="panel">
     <header>
-      <h1>North American Renewables Map</h1>
+      <div class="title-row">
+        <h1>North American Renewables Map</h1>
+        <button id="theme" type="button" title="Colour theme: auto (follows your system), light or dark">◐ Auto</button>
+      </div>
       <p class="sub">Prototype. Plant output is <strong>estimated</strong> by splitting each grid region's
-        hourly total among its plants<span id="weighting"></span>. Ontario's large plants are metered.</p>
+        hourly total among its plants<span id="weighting"></span>. Ontario's and Alberta's large plants are metered.</p>
     </header>
 
     <section id="time">
@@ -39,7 +42,9 @@
 
     <section class="layers small">
       <label><input type="checkbox" id="show-regions" checked> Grid regions</label>
-      <label><input type="checkbox" id="show-flows" checked> Québec power flows</label>
+      <label><input type="checkbox" id="show-flows" checked> Cross-border flows</label>
+      <label hidden><input type="checkbox" id="show-wind" checked> Wind at 100 m</label>
+      <label hidden><input type="checkbox" id="show-clouds"> Cloud cover</label>
     </section>
 
     <section id="notice" hidden></section>
@@ -55,7 +60,8 @@
     <footer class="muted small">
       <p>Circle area is proportional to MW: the outline is nameplate capacity, the solid fill is the
         estimate for the selected hour. A grey outline means that plant's region has no data for the hour yet.
-        Dashed lines are grid regions; US ones are approximate and some overlap. Click inside one for its totals.</p>
+        Violet lines are grid regions; US ones are approximate and some overlap. Click inside one for its totals.
+        Moving lines show wind at 100 m, about turbine hub height; brighter lines are faster wind.</p>
       <p id="sources"></p>
     </footer>
   </aside>
@@ -64,6 +70,7 @@
 
   <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/deck.gl@9.4.0/dist.min.js"></script>
+  <script src="weather.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

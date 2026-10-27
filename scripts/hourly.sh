@@ -3,6 +3,8 @@
 # Appends a timestamped section to logs/pipeline.log and keeps about a week of it.
 
 cd "$(dirname "$0")/.." || exit 1
+# launchd starts jobs with a bare PATH; GDAL's tools (gfs.py, regions.py) live in Homebrew's.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 LOG=logs/pipeline.log
 mkdir -p logs
 

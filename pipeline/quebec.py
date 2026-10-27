@@ -44,7 +44,8 @@ def production():
 
 
 def flows():
-    """Net flow out of Québec to each neighbour: utc, neighbour, mw (negative = into Québec)."""
+    """Net flow out of Québec to each neighbour: utc, link ("Québec→X"), source, mw
+    (negative = into Québec)."""
     df = _records("importations-exportations-avec-transits")
     # Placeholder rows for coming hours are all zero; a real hour has some exchange somewhere.
     exports = [cols[0] for cols in NEIGHBOURS.values()]
@@ -52,7 +53,7 @@ def flows():
     rows = []
     for name, (out_col, in_col) in NEIGHBOURS.items():
         net = pd.to_numeric(df[out_col], errors="coerce").fillna(0) - pd.to_numeric(df[in_col], errors="coerce").fillna(0)
-        rows.append(pd.DataFrame({"utc": df["date"], "neighbour": name, "mw": net}))
+        rows.append(pd.DataFrame({"utc": df["date"], "link": f"Québec→{name}", "source": "Hydro-Québec", "mw": net}))
     return pd.concat(rows, ignore_index=True)
 
 

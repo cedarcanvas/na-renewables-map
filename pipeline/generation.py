@@ -233,25 +233,43 @@ def last_window(df, hours=HOURS):
 
 
 def canada_rows():
-    """Ontario's and Québec's totals by fuel as live rows. Neither reports to EIA-930,
-    so there's nothing to calibrate against. Also saves Ontario's per-plant readings
-    and Québec's flows to its neighbours for allocate.py."""
-    from . import ontario, quebec
+    """Canadian provinces' totals by fuel as live rows. None report to EIA-930, so
+    there's nothing to calibrate against. Also saves per-plant readings (Ontario,
+    Alberta) and cross-border flows for allocate.py."""
+    from . import alberta, ontario, quebec, snapshots
 
     since = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=HOURS) - API_LAG_MARGIN
-    rows = []
+    plants = pd.DataFrame([f["properties"] for f in json.loads(PLANTS_GEOJSON.read_text())["features"]])
+    rows, metered, flows = [], [], []
     try:
-        plants = pd.DataFrame([f["properties"] for f in json.loads(PLANTS_GEOJSON.read_text())["features"]])
         per_plant, totals = ontario.build(since, plants)
-        per_plant.to_csv(METERED_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
+        metered.append(per_plant)
         rows.append(totals.assign(ba="IESO", feed="IESO"))
     except Exception as e:
         print(f"  Ontario (IESO) unavailable ({type(e).__name__}: {e})")
     try:
         rows.append(quebec.production().assign(ba="HQT", feed="Hydro-Québec"))
-        quebec.flows().to_csv(FLOWS_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
+        flows.append(quebec.flows())
     except Exception as e:
         print(f"  Québec (Hydro-Québec) unavailable ({type(e).__name__}: {e})")
+    try:
+        snaps = snapshots.hourly(snapshots.build())
+        snaps = snaps[snaps["utc"] >= since]
+        per_plant, totals = alberta.build(snaps, plants, since)
+        metered.append(per_plant)
+        rows.append(totals.assign(ba="AESO", feed="AESO"))
+        # Provincial totals: Nova Scotia's wind, SaskPower's wind/hydro/solar.
+        for _, t in snaps[snaps["kind"] == "total"].groupby("source"):
+            rows.append(pd.DataFrame({"utc": t["utc"], "fuel": t["fuel"], "mw": t["mw"],
+                                      "ba": t["key"], "feed": t["source"]}))
+        f = snaps[snaps["kind"] == "flow"]
+        flows.append(pd.DataFrame({"utc": f["utc"], "link": f["key"], "source": f["source"], "mw": f["mw"]}))
+    except Exception as e:
+        print(f"  Snapshot feeds (AESO, NS, NB, SK) unavailable ({type(e).__name__}: {e})")
+    if metered:
+        pd.concat(metered, ignore_index=True).to_csv(METERED_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
+    if flows:
+        pd.concat(flows, ignore_index=True).to_csv(FLOWS_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
     return pd.concat(rows, ignore_index=True).assign(source="live") if rows else pd.DataFrame()
 
 
@@ -274,7 +292,7 @@ def build():
     canada = canada_rows()
     if len(canada):
         df = pd.concat([df, canada], ignore_index=True)
-        source += " + IESO and Hydro-Québec"
+        source += " + Canadian grid operators"
 
     window = last_window(df)
     BA_GENERATION_CSV.parent.mkdir(parents=True, exist_ok=True)

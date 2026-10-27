@@ -5,3 +5,4 @@ openpyxl>=3.1
 requests>=2.32
 gridstatus>=0.37
 shapely>=2.0
+lxml>=5.0

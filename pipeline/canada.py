@@ -4,7 +4,8 @@ Wind: NRCan's Canadian Wind Turbine Database (current; one point per turbine,
 grouped here into projects). Hydro and solar: the North American Cooperation on
 Energy Information's renewable plants of 1 MW or more (2017; fine for hydro,
 which rarely changes, thin for solar). Both come from NRCan's map services, as
-their FTP downloads weren't reachable.
+their FTP downloads weren't reachable. Alberta's solar farms come from
+OpenStreetMap (ODbL) instead, since most were built after 2017.
 
 Each plant's `ba` is its province's grid region code, matching regions.py.
 """
@@ -19,6 +20,9 @@ from .common import RAW, USER_AGENT
 CWTD = "https://maps-cartes.services.geo.ca/server_serveur/rest/services/NRCan/wind_turbine_database2_en/MapServer"
 NACEI = ("https://geoappext.nrcan.gc.ca/arcgis/rest/services/NACEI/"
          "energy_infrastructure_of_north_america_en/MapServer/28")
+# Overpass asks clients to identify themselves; it refuses browser-style user agents.
+OVERPASS = "https://overpass-api.de/api/interpreter"
+OVERPASS_AGENT = "na-renewables-map/0.1 (prototype renewables map)"
 
 # Province -> (abbreviation, grid region code). Territories run small isolated grids.
 PROVINCES = {
@@ -94,9 +98,42 @@ def hydro_solar_plants():
     return pd.concat(out, ignore_index=True)
 
 
+def _mw(tag):
+    """OSM capacity tags ("37 MW", "1,080 KW", "20 MWp") -> MW, or NaN."""
+    m = re.match(r"\s*([\d.,]+)\s*([kKmMgG])?[wW]", str(tag or ""))
+    if not m:
+        return float("nan")
+    value = float(m.group(1).replace(",", ""))
+    return value * {"k": 0.001, "m": 1, "g": 1000}.get((m.group(2) or "m").lower(), 1)
+
+
+def osm_solar(province_code="CA-AB"):
+    """Solar farms mapped in OpenStreetMap (ODbL). Alberta's solar is mostly newer than
+    the 2017 NACEI data, and AESO reports each farm, so they need locations."""
+    query = f"""[out:json][timeout:90];
+        area["ISO3166-2"="{province_code}"]->.a;
+        nwr["power"="plant"]["plant:source"="solar"](area.a);
+        out center tags;"""
+    r = requests.post(OVERPASS, data={"data": query}, headers={"User-Agent": OVERPASS_AGENT}, timeout=180)
+    r.raise_for_status()
+    rows = []
+    for e in r.json()["elements"]:
+        tags, centre = e.get("tags", {}), e.get("center", e)
+        rows.append({
+            "name": tags.get("name") or f"Solar farm (OSM {e['type']} {e['id']})", "fuel": "solar",
+            "cap": _mw(tags.get("plant:output:electricity")), "province": ABBREV[province_code[-2:]],
+            "lat": centre.get("lat"), "lon": centre.get("lon"), "units": 1,
+            "op_year": float("nan"), "hub_m": float("nan"),
+        })
+    return pd.DataFrame(rows)
+
+
 def plants():
     """Canadian plants as GeoJSON features in plants.geojson's shape."""
-    df = pd.concat([wind_projects(), hydro_solar_plants()], ignore_index=True)
+    nacei = hydro_solar_plants()
+    # Alberta's solar comes from OpenStreetMap instead of the 2017 layer.
+    nacei = nacei[~((nacei["province"] == "Alberta") & (nacei["fuel"] == "solar"))]
+    df = pd.concat([wind_projects(), nacei, osm_solar("CA-AB")], ignore_index=True)
     df = df[df["province"].isin(PROVINCES) & df["lat"].notna() & df["lon"].notna() & (df["cap"] > 0)]
     features = []
     for p in df.itertuples():
