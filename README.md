@@ -15,6 +15,9 @@ batches), so for the hours after it ends the map uses the ISOs' own 5-minute
 fuel-mix feeds, calibrated against EIA over the hours both cover. They hold
 about 82% of US wind and 66% of solar capacity. Bonneville (BPA) posts its own
 5-minute data too, which covers most of the Pacific Northwest's hydro and wind.
+PJM stays on EIA-930 by choice: its live feed comes from Data Miner, whose
+terms forbid publishing data from it, or derived from it, without PJM
+membership.
 Other regions show as "no data" (grey outlines) until EIA publishes them.
 
 Canada: Ontario's large plants show **metered** output from IESO's hourly
@@ -29,7 +32,7 @@ arcs (deck.gl). Other provinces show capacity only for now.
 |---|---|---|
 | Plants, capacity, coordinates, region | [EIA-860M](https://www.eia.gov/electricity/data/eia860m/) | monthly |
 | Hourly totals by region and fuel | [EIA-930](https://www.eia.gov/electricity/gridmonitor/): API v2 with a key, otherwise the six-month bulk CSV | generation up to a day behind |
-| Live fuel mix for CAISO, ERCOT, SPP, MISO, NYISO, ISO-NE (PJM with a key) | the ISOs' public feeds via [gridstatus](https://github.com/gridstatus/gridstatus) | every 5 minutes; SPP an hour or two behind |
+| Live fuel mix for CAISO, ERCOT, SPP, MISO, NYISO, ISO-NE | the ISOs' public feeds via [gridstatus](https://github.com/gridstatus/gridstatus) | every 5 minutes; SPP an hour or two behind |
 | Bonneville (BPA) wind + solar and hydro | [BPA's 5-minute BA data](https://transmission.bpa.gov/business/operations/wind/baltwg.txt) | every 5 minutes |
 | Canadian wind farms | NRCan [Canadian Wind Turbine Database](https://open.canada.ca/data/en/dataset/79fdad93-9025-49ad-ba16-c26d718cc070) (map service) | monthly with plants |
 | Canadian hydro and solar plants | NACEI renewable plants ≥ 1 MW (2017; thin for newer solar) | monthly with plants |
@@ -103,6 +106,5 @@ Region codes that differ between the two EIA datasets are mapped in
 ## Next
 
 - Per-farm hub heights from the US Wind Turbine Database instead of a flat 100 m
-- PJM's live feed (needs `PJM_API_KEY`)
 - Real per-plant output for Alberta (AESO) and Ontario (IESO)
 - Generation chart and hosting

@@ -1,4 +1,4 @@
-"""Live fuel mix from the seven ISOs, averaged into hourly totals per BA.
+"""Live fuel mix from six ISOs and BPA, averaged into hourly totals per BA.
 
 EIA-930 generation has run up to a day behind, but the ISOs post their own fuel
 mix every 5 minutes. This fetches yesterday and today (ISO local time) through
@@ -9,8 +9,9 @@ A feed's boundaries and categories don't always match EIA-930's (SPP's feed
 includes its western RTO, which EIA reports as SWPW), so generation.py
 calibrates each feed against EIA over the hours both cover before using it.
 
-PJM needs a free Data Miner API key (PJM_API_KEY in .env); without it PJM stays
-on EIA. Output: data/live_generation.csv with columns utc, iso, fuel, mw.
+PJM isn't here on purpose: its feed comes from Data Miner, whose terms forbid
+publishing data from it, or derived from it, without PJM membership. PJM stays
+on EIA-930. Output: data/live_generation.csv with columns utc, iso, fuel, mw.
 """
 
 import datetime as dt
@@ -20,7 +21,7 @@ import warnings
 
 import pandas as pd
 
-from .common import LIVE_GENERATION_CSV, USER_AGENT, env_value
+from .common import LIVE_GENERATION_CSV, USER_AGENT
 
 # ISO -> (gridstatus class, EIA BAs the feed covers, {our fuel: ISO columns to add up}).
 # A fuel left out here stays on EIA for those BAs.
@@ -40,7 +41,6 @@ ISOS = {
     # Not an ISO, but Bonneville posts its own 5-minute data. "VER" is wind plus
     # solar; it's calibrated against EIA's BPAT wind, BPA's solar being small.
     "BPA": ("BPA", ["BPAT"], {"wind": ["VER"], "hydro": ["Hydro"]}),
-    "PJM": ("PJM", ["PJM"], {"wind": ["Wind"], "solar": ["Solar"], "hydro": ["Hydro"]}),
 }
 
 # An hour needs at least this many readings to count; ISO-NE posts irregularly.
@@ -79,11 +79,6 @@ def _iso(cls_name):
 
     import gridstatus as gs  # imported here so the rest of the pipeline works without it
 
-    if cls_name == "PJM":
-        key = env_value("PJM_API_KEY")
-        if not key:
-            return None
-        return gs.PJM(api_key=key)
     return getattr(gs, cls_name)()
 
 
@@ -105,15 +100,15 @@ def hourly(df, columns):
         mw = df[present].apply(pd.to_numeric, errors="coerce").sum(axis=1, min_count=1)
         g = pd.DataFrame({"utc": hour, "mw": mw}).dropna().groupby("utc")["mw"].agg(["mean", "size"])
         # The current hour is still filling up; keep only hours the feed has passed.
-        g = g[(g["size"] >= MIN_READINGS_PER_HOUR) & (g.index <= stamp.max())]
+        # Judged by readings with values: BPA's file carries empty rows for later today.
+        last_reading = stamp[mw.notna()].max()
+        g = g[(g["size"] >= MIN_READINGS_PER_HOUR) & (g.index <= last_reading)]
         rows.append(pd.DataFrame({"utc": g.index, "fuel": fuel, "mw": g["mean"].to_numpy()}))
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=["utc", "fuel", "mw"])
 
 
 def fetch_iso(name, cls_name, columns):
     iso = _iso(cls_name)
-    if iso is None:
-        return None, "skipped (no PJM_API_KEY)"
     today = pd.Timestamp.now(tz=iso.default_timezone).date()
     frames, notes = [], []
     for day in (today - dt.timedelta(days=1), "today"):
@@ -148,7 +143,9 @@ def build():
     if previous is not None and "iso" in previous:
         # This run's values win for hours both have; older hours carry over.
         live = pd.concat([previous, fresh], ignore_index=True).drop_duplicates(["utc", "iso", "fuel"], keep="last")
-        live = live[live["utc"] >= pd.Timestamp.now(tz="UTC") - KEEP].sort_values(["iso", "fuel", "utc"])
+        now = pd.Timestamp.now(tz="UTC")
+        # An hour ending after now can't be complete, whatever an earlier run stored.
+        live = live[(live["utc"] >= now - KEEP) & (live["utc"] <= now.floor("h"))].sort_values(["iso", "fuel", "utc"])
     else:
         live = fresh
     LIVE_GENERATION_CSV.parent.mkdir(parents=True, exist_ok=True)

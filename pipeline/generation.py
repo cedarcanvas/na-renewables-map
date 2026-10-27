@@ -206,23 +206,27 @@ def live_after_eia(eia, live):
 
 # --- Window selection -------------------------------------------------------
 
-# With live data the window ends where most live BAs have reached; SPP's feed runs
-# an hour or two behind the others, and its last hours show as "no data" rather
-# than holding the whole map back.
+# With live data the window ends where most live feeds have reached. Slower feeds
+# (SPP an hour or two, Hydro-Québec about three) show their last hours as "no
+# data" rather than holding the whole map back.
 LIVE_REPORTING_SHARE = 0.5
 
 
 def last_window(df, hours=HOURS):
-    """The last `hours` hours, ending at the latest hour most BAs have reported.
+    """The last `hours` hours, ending at the latest hour most sources have reported.
 
-    When there are live hours, "most BAs" means most of the BAs with live data:
-    the others stop where EIA does.
+    With live hours, the vote is one per live feed, not per BA: SPP's one feed
+    covers two BAs and shouldn't count twice. Without them, it's one per BA.
     """
     reported = df.dropna(subset=["mw"])
     is_live = reported["source"] == "live"
-    pool, share = (reported[is_live], LIVE_REPORTING_SHARE) if is_live.any() else (reported, REPORTING_SHARE)
-    latest_per_ba = pool.groupby("ba")["utc"].max()
-    end = latest_per_ba.quantile(1 - share, interpolation="lower")
+    if is_live.any():
+        pool, share = reported[is_live], LIVE_REPORTING_SHARE
+        voter = pool["feed"].fillna(pool["ba"]) if "feed" in pool else pool["ba"]
+    else:
+        pool, share, voter = reported, REPORTING_SHARE, reported["ba"]
+    latest = pool.groupby(voter)["utc"].max()
+    end = latest.quantile(1 - share, interpolation="lower")
     start = end - pd.Timedelta(hours=hours - 1)
     window = reported[(reported["utc"] >= start) & (reported["utc"] <= end)]
     return window.sort_values(["utc", "ba", "fuel"]).reset_index(drop=True)

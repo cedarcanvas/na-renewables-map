@@ -386,22 +386,28 @@ function renderPanel() {
   renderTop();
 }
 
-// Feeds whose live data is in use at the selected hour.
+// Live feeds with data at the selected hour, and live feeds that haven't reached it yet.
 function liveFeedsNow() {
   const hour = state.gen.hours[state.hour];
-  return [...new Set(Object.values(state.gen.live ?? {}).filter((l) => l.from <= hour).map((l) => l.feed))];
+  const started = Object.values(state.gen.live ?? {}).filter((l) => l.from <= hour);
+  const now = new Set(started.filter((l) => hour <= l.until).map((l) => l.feed));
+  const behind = new Set(started.filter((l) => hour > l.until && !now.has(l.feed)).map((l) => l.feed));
+  return { now: [...now], behind: [...behind] };
 }
 
 function renderCoverage(caps) {
   const el = $("#coverage");
   if (!state.gen) return (el.textContent = "");
   const hour = state.gen.hours[state.hour];
-  const feeds = liveFeedsNow();
+  const { now: feeds, behind } = liveFeedsNow();
+  const lagging = behind.length
+    ? ` ${behind.join(" and ")} ${behind.length > 1 ? "haven't" : "hasn't"} reached this hour yet.`
+    : "";
   let text;
-  if (!feeds.length) text = "Source: EIA-930.";
+  if (!feeds.length && !behind.length) text = "Source: EIA-930.";
   else if (state.gen.eia_until && hour > state.gen.eia_until)
-    text = `Source: live grid-operator feeds (${feeds.join(", ")}). Other regions appear once EIA-930 publishes them.`;
-  else text = `Source: EIA-930, plus live grid-operator feeds (${feeds.join(", ")}) where EIA hasn't reported yet.`;
+    text = `Source: live grid-operator feeds (${feeds.join(", ")}).${lagging} Other regions appear once EIA-930 publishes them.`;
+  else text = `Source: EIA-930, plus live grid-operator feeds (${feeds.join(", ")}) where EIA hasn't reported yet.${lagging}`;
 
   const partial = Object.entries(FUELS)
     .filter(([fuel]) => coveredCap(fuel, caps) < PARTIAL * caps[fuel])
