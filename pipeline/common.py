@@ -12,10 +12,20 @@ WEB_DATA = ROOT / "web" / "data"
 
 PLANTS_GEOJSON = WEB_DATA / "plants.geojson"
 BA_GENERATION_CSV = ROOT / "data" / "ba_generation.csv"
+LIVE_GENERATION_CSV = ROOT / "data" / "live_generation.csv"
+CALIBRATION_JSON = ROOT / "data" / "calibration.json"
+WEATHER_CSV = ROOT / "data" / "weather.csv"
 PLANT_GENERATION_JSON = WEB_DATA / "generation.json"
 
 # How many hours of history the map's time slider covers.
 HOURS = 48
+
+# Weather is fetched once per grid cell, not per plant. Open-Meteo's free tier
+# counts every location as a call (600/minute, 10,000/day): 0.5° cells cover
+# the ~9,000 wind and solar plants with ~1,600 locations.
+WEATHER_CELL_DEG = 0.5
+# Reuse fetched weather for this long before asking Open-Meteo again.
+WEATHER_MAX_AGE_HOURS = 6
 
 USER_AGENT = "Mozilla/5.0 (na-renewables-map prototype)"
 
@@ -63,17 +73,21 @@ BA_ALIASES = {
 }
 
 
-def eia_api_key():
-    """EIA_API_KEY from the environment or a .env file at the repo root, else None."""
-    if os.environ.get("EIA_API_KEY"):
-        return os.environ["EIA_API_KEY"]
+def env_value(name):
+    """A setting from the environment or a .env file at the repo root, else None."""
+    if os.environ.get(name):
+        return os.environ[name]
     env = ROOT / ".env"
     if env.exists():
         for line in env.read_text().splitlines():
             key, _, value = line.partition("=")
-            if key.strip() == "EIA_API_KEY" and value.strip():
+            if key.strip() == name and value.strip():
                 return value.strip().strip('"').strip("'")
     return None
+
+
+def eia_api_key():
+    return env_value("EIA_API_KEY")
 
 
 def download(url, dest, force=False):

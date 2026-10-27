@@ -6,3 +6,4 @@ __pycache__/
 # Downloads and generated data; rebuild with `python -m pipeline.run`.
 data/
 web/data/
+logs/

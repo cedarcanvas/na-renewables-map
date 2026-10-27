@@ -24,6 +24,11 @@ const radius = (mw) => [
   11, ["*", 4, ["sqrt", mw]],
 ];
 const fuelColor = ["match", ["get", "fuel"], ...Object.entries(FUELS).flatMap(([k, f]) => [k, f.color]), "#888"];
+// Plants whose region has no data for the selected hour (mw = -1) are drawn grey.
+const NO_DATA = "#9aa3ad";
+const ringColor = ["case", ["<", ["get", "mw"], 0], NO_DATA, fuelColor];
+// Below this share of a fuel's capacity reporting, its total is marked partial.
+const PARTIAL = 0.9;
 
 const map = new maplibregl.Map({
   container: "map",
@@ -52,6 +57,7 @@ async function init() {
   }
 
   const slider = $("#slider");
+  if (state.gen?.weighting === "weather") $("#weighting").textContent = ", weighted by local wind and sunshine";
   if (state.gen) {
     slider.max = state.gen.hours.length - 1;
     state.hour = state.gen.hours.length - 1;
@@ -89,9 +95,9 @@ function addPlantLayers() {
     layout: { "circle-sort-key": ["-", ["get", "cap"]] },
     paint: {
       "circle-radius": radius(["get", "cap"]),
-      "circle-color": fuelColor,
+      "circle-color": ringColor,
       "circle-opacity": 0.08,
-      "circle-stroke-color": fuelColor,
+      "circle-stroke-color": ringColor,
       "circle-stroke-opacity": 0.55,
       "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 9, 1.2],
     },
@@ -190,15 +196,24 @@ function buildTotalsTable() {
   }
 }
 
+// Capacity (MW) of plants whose region reported this hour; all of it for older data files.
+function coveredCap(fuel, caps) {
+  return state.gen?.covered_cap?.[fuel]?.[state.hour] ?? caps[fuel];
+}
+
 function renderPanel() {
   const caps = capacityByFuel();
   for (const tr of document.querySelectorAll("#totals tbody tr")) {
     const fuel = tr.dataset.fuel;
     const now = state.gen?.totals[fuel]?.[state.hour];
+    const covered = coveredCap(fuel, caps);
+    const partial = covered < PARTIAL * caps[fuel];
     tr.querySelector("[data-cap]").textContent = fmt(caps[fuel] / 1000, 1);
-    tr.querySelector("[data-now]").textContent = now == null ? "–" : fmt(now / 1000, 1);
-    tr.querySelector("[data-pct]").textContent = now == null ? "–" : fmt((100 * now) / caps[fuel]);
+    tr.querySelector("[data-now]").textContent = now == null ? "–" : fmt(now / 1000, 1) + (partial ? "*" : "");
+    // % of the capacity that reported, so a partial hour isn't read as a collapse.
+    tr.querySelector("[data-pct]").textContent = now == null || !covered ? "–" : fmt((100 * now) / covered);
   }
+  renderCoverage(caps);
 
   if (state.gen) {
     const t = new Date(state.gen.hours[state.hour]);
@@ -208,6 +223,30 @@ function renderPanel() {
     $("#time-utc").textContent = `Hour ending ${state.gen.hours[state.hour].replace("T", " ").replace(":00Z", " UTC")}`;
   }
   renderTop();
+}
+
+// Feeds whose live data is in use at the selected hour.
+function liveFeedsNow() {
+  const hour = state.gen.hours[state.hour];
+  return [...new Set(Object.values(state.gen.live ?? {}).filter((l) => l.from <= hour).map((l) => l.feed))];
+}
+
+function renderCoverage(caps) {
+  const el = $("#coverage");
+  if (!state.gen) return (el.textContent = "");
+  const hour = state.gen.hours[state.hour];
+  const feeds = liveFeedsNow();
+  let text;
+  if (!feeds.length) text = "Source: EIA-930.";
+  else if (state.gen.eia_until && hour > state.gen.eia_until)
+    text = `Source: live ISO feeds (${feeds.join(", ")}). Other regions appear once EIA-930 publishes them.`;
+  else text = `Source: EIA-930, plus live ISO feeds (${feeds.join(", ")}) where EIA hasn't reported yet.`;
+
+  const partial = Object.entries(FUELS)
+    .filter(([fuel]) => coveredCap(fuel, caps) < PARTIAL * caps[fuel])
+    .map(([fuel, f]) => `${fmt((100 * coveredCap(fuel, caps)) / caps[fuel])}% of ${f.label.toLowerCase()}`);
+  if (partial.length) text += ` *Regions reporting this hour hold ${partial.join(", ")} capacity.`;
+  el.textContent = text;
 }
 
 function renderTop() {
@@ -230,8 +269,15 @@ function renderTop() {
 function renderSources() {
   const g = state.gen;
   const plantsSrc = state.plants.source?.split("/").pop() ?? "EIA-860M";
-  $("#sources").innerHTML = `Plants: <a href="https://www.eia.gov/electricity/data/eia860m/">EIA-860M</a> (${plantsSrc}).
+  const updated = g?.generated_at && new Date(g.generated_at).toLocaleString(undefined, {
+    weekday: "short", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+  });
+  $("#sources").innerHTML = `${updated ? `<strong>Updated ${updated}.</strong> ` : ""}
+    Plants: <a href="https://www.eia.gov/electricity/data/eia860m/">EIA-860M</a> (${plantsSrc}).
     Generation: <a href="https://www.eia.gov/electricity/gridmonitor/">EIA-930</a>${g ? ` via ${g.generation_source}` : ""}.
+    ${Object.keys(g?.live ?? {}).length ? `Live fuel mix: ${[...new Set(Object.values(g.live).map((l) => l.feed))].join(", ")},
+      via <a href="https://github.com/gridstatus/gridstatus">gridstatus</a>.` : ""}
+    ${g?.weighting === "weather" ? `Weather: <a href="https://open-meteo.com/">Open-Meteo</a> (CC BY 4.0).` : ""}
     Basemap: <a href="https://openfreemap.org">OpenFreeMap</a> © OpenMapTiles © OpenStreetMap contributors.`;
 }
 
@@ -252,6 +298,11 @@ function showPopup(id) {
   const p = f.properties;
   const mw = mwFor(id);
   const cf = mw == null ? null : (100 * mw) / p.cap;
+  const local = state.gen?.weather?.[id]?.[state.hour];
+  const weighted = state.gen?.weighting === "weather" && local != null;
+  const weatherRow = local == null ? ""
+    : p.fuel === "wind" ? `<dt>Wind at 100 m</dt><dd>${fmt(local, 1)} m/s</dd>`
+    : `<dt>Sunshine</dt><dd>${fmt(local)} W/m²</dd>`;
   new maplibregl.Popup({ maxWidth: "260px" })
     .setLngLat(f.geometry.coordinates)
     .setHTML(`
@@ -262,14 +313,29 @@ function showPopup(id) {
           <dt>Est. output</dt><dd>${mw == null ? "no data" : `${fmt(mw, mw < 10 ? 1 : 0)} MW`}</dd>
           <dt>Capacity</dt><dd>${fmt(p.cap, 1)} MW</dd>
           <dt>Of capacity</dt><dd>${cf == null ? "–" : `${fmt(cf)}%`}</dd>
+          ${weatherRow}
           <dt>Grid region</dt><dd>${p.ba || "–"}</dd>
           <dt>State</dt><dd>${p.state}</dd>
           <dt>Units</dt><dd>${p.units}</dd>
           <dt>Since</dt><dd>${p.op_year ?? "–"}</dd>
         </dl>
-        <div class="note">Estimated: a share of ${p.ba || "its region"}'s reported ${p.fuel} total, not metered at the plant.</div>
+        <div class="note">${popupNote(p, mw, weighted)}</div>
       </div>`)
     .addTo(map);
+}
+
+function popupNote(p, mw, weighted) {
+  const region = p.ba || "its region";
+  const live = state.gen.live?.[p.ba];
+  if (mw == null && live && state.gen.hours[state.hour] > live.until)
+    return `No data for this hour yet: ${live.feed}'s live feed runs a little behind the others.`;
+  if (mw == null) return `No data for this hour yet: ${region}'s figures haven't been published.`;
+  const fromLive = live && state.gen.hours[state.hour] >= live.from;
+  const source = fromLive
+    ? `${live.feed}'s live ${p.fuel} feed (5-minute readings averaged over the hour)`
+    : `${region}'s ${p.fuel} total reported to EIA`;
+  const weighting = weighted ? `, weighted by local ${p.fuel === "wind" ? "wind" : "sunshine"}` : "";
+  return `Estimated: a share of ${source}${weighting}, not metered at the plant.`;
 }
 
 function escapeHtml(s) {

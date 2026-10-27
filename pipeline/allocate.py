@@ -1,13 +1,15 @@
 """Estimate each plant's hourly output by splitting its BA's EIA-930 total.
 
 EIA-930 only says "BA X produced N MW of wind this hour". allocate() decides
-how that N is shared among the BA's wind plants. Phase 2 will weight the split
-by local weather; for now the only per-plant input is nameplate capacity.
+how that N is shared among the BA's wind plants: in proportion to capacity,
+weighted for wind and solar by each plant's local weather (see curves.py).
 
 Output: web/data/generation.json
-  hours   – UTC end-of-hour timestamps
-  totals  – {fuel: [MW per hour]} summed straight from the BA reports
-  series  – {plant id: [estimated MW, or null where the BA didn't report]}
+  hours     – UTC end-of-hour timestamps
+  totals    – {fuel: [MW per hour]} summed straight from the BA reports
+  series    – {plant id: [estimated MW, or null where the BA didn't report]}
+  weather   – {plant id: [hub wind m/s (wind) or sunshine W/m² (solar)]}
+  weighting – "weather", or "capacity" if no weather was available
 """
 
 import json
@@ -16,26 +18,64 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from .common import BA_GENERATION_CSV, FUELS, PLANT_GENERATION_JSON, PLANTS_GEOJSON, write_json
+from . import weather as wx
+from .common import BA_GENERATION_CSV, FUELS, PLANT_GENERATION_JSON, PLANTS_GEOJSON, WEATHER_CSV, write_json
+from .curves import solar_capacity_factor, wind_capacity_factor
+
+# For each weather-weighted fuel: the weather column it uses and its curve.
+WEIGHTING = {
+    "wind": ("wind_ms", wind_capacity_factor),
+    "solar": ("ghi", solar_capacity_factor),
+}
 
 
-def allocate(total_mw, capacities):
+def allocate(total_mw, capacities, weights=None):
     """Split one BA's total for one fuel and hour across that BA's plants.
 
     total_mw   – float, the BA's reported MW. Solar can be slightly negative at
                  night (inverters draw power), and the total can exceed the sum
                  of capacities when EIA-860M is missing some of the BA's plants.
     capacities – numpy array of nameplate MW, one per plant, all > 0.
+    weights    – optional numpy array of each plant's weather-expected capacity
+                 factor (0–1). Without it the split follows capacity alone.
     Returns a numpy array of estimated MW, the same length as capacities.
     """
     total = max(total_mw, 0.0)
-    est = total * capacities / capacities.sum()
-    return np.minimum(est, capacities)
+    expected = capacities if weights is None else capacities * weights
+    est = np.zeros_like(capacities)
+    room = np.ones(len(capacities), dtype=bool)
+    # A plant never exceeds nameplate. Its surplus passes to plants with headroom;
+    # once every plant is full the rest is dropped. Each pass fills at least one
+    # plant, so this ends within len(capacities) passes.
+    for _ in range(len(capacities)):
+        if total <= 1e-6 or not room.any():
+            break
+        share = expected[room]
+        if share.sum() <= 0:
+            share = capacities[room]  # weather says calm or dark, but the region reports output
+        add = np.minimum(total * share / share.sum(), capacities[room] - est[room])
+        est[room] += add
+        total -= add.sum()
+        room = est < capacities * (1 - 1e-9)
+    return est
 
 
 def load_plants():
     gj = json.loads(PLANTS_GEOJSON.read_text())
     return pd.DataFrame([f["properties"] for f in gj["features"]]), gj.get("source")
+
+
+def stamp(t):
+    return pd.Timestamp(t).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def live_isos():
+    """The ISO feed table, or {} if gridstatus isn't installed."""
+    try:
+        from .live import ISOS
+    except ImportError:
+        return {}
+    return ISOS
 
 
 def compact(v):
@@ -44,11 +84,29 @@ def compact(v):
     return round(float(v)) if abs(v) >= 10 else round(float(v), 1)
 
 
-def build(source="EIA-930"):
+def weather_grids(weather, hours):
+    """{column: DataFrame of hours × cells} from the long weather table."""
+    if weather is None:
+        return None
+    weather = weather.assign(utc=pd.to_datetime(weather["utc"], utc=True))
+    return {
+        col: weather.pivot(index="utc", columns="cell", values=col).reindex(pd.DatetimeIndex(hours, tz="UTC"))
+        for col, _ in WEIGHTING.values()
+    }
+
+
+def build(source="EIA-930", weather=None):
     plants, plants_source = load_plants()
     gen = pd.read_csv(BA_GENERATION_CSV, parse_dates=["utc"])
+    if "source" not in gen:
+        gen["source"] = "eia"
     hours = sorted(gen["utc"].unique())
     hour_index = {h: i for i, h in enumerate(hours)}
+
+    if weather is None and WEATHER_CSV.exists():
+        weather = pd.read_csv(WEATHER_CSV)
+    grids = weather_grids(weather, hours)
+    cells = wx.plant_cells()
 
     # (ba, fuel) -> array of MW per hour, NaN where the BA didn't report.
     totals = {}
@@ -57,18 +115,38 @@ def build(source="EIA-930"):
         arr[[hour_index[h] for h in g["utc"]]] = g["mw"].to_numpy()
         totals[(ba, fuel)] = arr
 
-    series = {}
+    series, plant_weather = {}, {}
     matched = set()
+    # Capacity of plants whose BA reported each hour: in live-only hours the
+    # regions EIA hasn't published yet drop out, and the map says so.
+    covered = {fuel: np.zeros(len(hours)) for fuel in FUELS}
     for (ba, fuel), group in plants.groupby(["ba", "fuel"]):
         ba_total = totals.get((ba, fuel))
         if ba_total is None:
             continue  # no EIA-930 data for this BA and fuel (e.g. Alaska, Hawaii)
         matched.add((ba, fuel))
         caps = group["cap"].to_numpy(dtype=float)
+        covered[fuel] += caps.sum() * ~np.isnan(ba_total)
+
+        # hours × plants matrix of expected capacity factors, or None.
+        cf = None
+        if grids is not None and fuel in WEIGHTING:
+            col, curve = WEIGHTING[fuel]
+            local = grids[col].reindex(columns=[cells[pid] for pid in group["id"]]).to_numpy(dtype=float)
+            for pid, values in zip(group["id"], local.T):
+                plant_weather[pid] = [compact(v) for v in values]
+            cf = curve(local)
+            # A plant with no weather gets the region's average for that hour.
+            known = ~np.isnan(cf)
+            row_mean = np.nansum(cf, axis=1, keepdims=True) / np.maximum(known.sum(axis=1, keepdims=True), 1)
+            cf = np.where(known, cf, np.where(known.any(axis=1, keepdims=True), row_mean, np.nan))
+
         est = np.full((len(hours), len(caps)), np.nan)
         for i, total in enumerate(ba_total):
-            if not np.isnan(total):
-                est[i] = allocate(float(total), caps)
+            if np.isnan(total):
+                continue
+            weights = None if cf is None or np.isnan(cf[i]).all() else cf[i]
+            est[i] = allocate(float(total), caps, weights)
         for j, pid in enumerate(group["id"]):
             series[pid] = [compact(v) for v in est[:, j]]
 
@@ -76,19 +154,32 @@ def build(source="EIA-930"):
         fuel: [compact(v) for v in np.nansum([a for (ba, f), a in totals.items() if f == fuel], axis=0)]
         for fuel in FUELS
     }
+    # BA -> first and last hours taken from its ISO's live feed, and which feed.
+    feed_of = {ba: name for name, (_, bas, _) in live_isos().items() for ba in bas}
+    live = {
+        ba: {"from": stamp(span["min"]), "until": stamp(span["max"]), "feed": feed_of.get(ba, ba)}
+        for ba, span in gen[gen["source"] == "live"].groupby("ba")["utc"].agg(["min", "max"]).iterrows()
+    }
+    eia_until = gen.loc[gen["source"] == "eia", "utc"].max()
     write_json({
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generation_source": source,
         "plants_source": plants_source,
-        "hours": [pd.Timestamp(h).strftime("%Y-%m-%dT%H:%M:%SZ") for h in hours],
+        "weighting": "weather" if grids is not None else "capacity",
+        "hours": [stamp(h) for h in hours],
         "totals": fuel_totals,
+        "covered_cap": {fuel: [round(v) for v in arr] for fuel, arr in covered.items()},
+        "eia_until": stamp(eia_until),
+        "live": live,
         "series": series,
+        "weather": plant_weather,
     }, PLANT_GENERATION_JSON)
 
     # Where the two datasets don't line up, so gaps on the map can be explained.
     unplaced = {k: np.nanmax(v) for k, v in totals.items() if k not in matched and np.nanmax(v) > 1}
     no_data = plants[~plants.set_index(["ba", "fuel"]).index.isin(list(totals))]
-    print(f"Estimated {len(series):,} of {len(plants):,} plants over {len(hours)} hours")
+    print(f"Estimated {len(series):,} of {len(plants):,} plants over {len(hours)} hours, "
+          f"split by {'weather' if grids is not None else 'capacity only'}")
     print(f"Plants with no BA data: {len(no_data):,} ({no_data['cap'].sum() / 1000:.1f} GW), "
           f"mostly BA codes: {no_data['ba'].replace('', '(blank)').value_counts().head(5).to_dict()}")
     if unplaced:

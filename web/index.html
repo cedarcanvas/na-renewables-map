@@ -12,7 +12,7 @@
     <header>
       <h1>US Renewables Map</h1>
       <p class="sub">Prototype. Plant output is <strong>estimated</strong> by splitting each grid region's
-        hourly EIA-930 total among its plants.</p>
+        hourly total among its plants<span id="weighting"></span>.</p>
     </header>
 
     <section id="time">
@@ -27,6 +27,7 @@
         </div>
       </div>
       <input id="slider" type="range" min="0" max="0" value="0" aria-label="Hour">
+      <p id="coverage" class="muted small"></p>
     </section>
 
     <section>
@@ -48,7 +49,7 @@
 
     <footer class="muted small">
       <p>Circle area is proportional to MW: the outline is nameplate capacity, the solid fill is the
-        estimate for the selected hour.</p>
+        estimate for the selected hour. A grey outline means that plant's region has no data for the hour yet.</p>
       <p id="sources"></p>
     </footer>
   </aside>
