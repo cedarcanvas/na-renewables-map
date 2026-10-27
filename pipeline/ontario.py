@@ -5,7 +5,10 @@ Generator Output and Capability report), so Ontario plants show measured output
 instead of estimates. IESO's generator codes ("BECK2", "PORTALMA-T1") are matched
 to canada.py's plants by name, with the overrides below where names differ.
 Output from codes left unmatched still counts: allocate.py spreads it across
-Ontario's unmatched plants of that fuel, as it does for US regions.
+Ontario's unmatched plants of that fuel, as it does for US regions. Where every
+code of a fuel is matched, the unmatched plants are ones IESO doesn't report
+(farms on local distribution grids), and the map shows them as not reporting.
+backtest.py lists codes whose IESO capacity disagrees with their plants'.
 
 Returns per-plant rows and Ontario totals by fuel; past days are cached.
 """
@@ -52,9 +55,13 @@ OVERRIDES = {
     "APIROQUOIS": ["Iroquois Falls", "Island Falls (H2O)", "Twin Falls"],  # likely: the Abitibi River stations
     "KINGSTONSF": ["Sol-Luce Kingston"],
     "GRANDSF": ["Grand Renewable Energy Park"],
-    "NORTHLAND POWER SOLAR FACILITIES": "Northland Power",  # every plant whose name contains this
+    # IESO's 40 MW: the four 10 MW farms near Cochrane, whose sunshine its output follows (r 0.75;
+    # Northland's other nine Ontario farms ≤ 0.61). The rest aren't in IESO's report.
+    "NORTHLAND POWER SOLAR FACILITIES": ["Northland Power Solar Long Lake", "Northland Power Solar Martin's Meadows",
+                                         "Northland Power Solar Empire", "Northland Power Solar Abitibi"],
+    "STONE MILLS SF": ["Loyalist Solar"],      # BluEarth's 54 MW farm in Stone Mills, not the 11 MW "Stone Mills"
     "K2WIND": ["K2 Wind Power Facility"],
-    "AMARANTH": ["Melancthon"],
+    "AMARANTH": ["Melancthon"],                # both phases: IESO shows up to 159 MW available, phase 2 is 132
     "PORT BURWELL": ["Erie Shores"],
     "WEST LINCOLN NRWF": ["Niagara Region"],
     "HENVEY NORTH": ["Henvey Inlet Wind Farm"],
@@ -67,10 +74,21 @@ OVERRIDES = {
     "GRANDWF": ["Grand Renewable Wind"],
     "BOW LAKE 2": ["Bow Lake Wind Project"],
     "CEDAR POINT 2": ["Cedar Point"],
-    "GRAND VALLEY 3": ["Grand Valley"],
+    "GRAND VALLEY 3": ["Grand Valley 3"],      # 40 MW; phases 1 and 2 (20 MW) aren't in IESO's report
     "KINGSBRIDGE": ["Kingsbridge I Wind Power"],
-    "ZURICH": ["Bluewater Wind Farm"],         # likely: the 0.8 MW "Zurich" turbine is a different project
     "CRYSLER": ["Nation Rise Wind Farm"],      # likely: Nation Rise is beside Crysler
+    # Codes named after roads and stations, matched by IESO's capacity (max available MW) and by
+    # how well each farm's local wind explains the code's output over four weeks (backtest weather):
+    "PORTALMA-T1": ["Port Alma"],              # 101 MW; T1 and T3 are Kruger's two 101.2 MW farms,
+    "PORTALMA-T3": ["Chatham"],                # likely: too close together for the weather to tell apart
+    "ZURICH": ["Grand Bend Wind Farm"],        # likely: 99 MW (r 0.86); Goshen, as close a fit, has its own code
+    "BLAKE": ["Bluewater Wind Farm"],          # likely: 60 MW (r 0.89)
+    "SPENCE": ["Talbot"],                      # likely: 99 MW (r 0.76), the only unmetered farm that size
+    "SHANNON": ["Dufferin Wind"],              # likely: 91 MW (r 0.89)
+    "DILLON": ["Raleigh Wind Energy Centre"],  # likely: 78 MW (r 0.92)
+    "LANDON": ["Suncor Adelaide Wind Energy"], # likely: 40 MW (r 0.89)
+    "SANDUSK-LT.AG_T1": ["Port Dover and Nanticoke"],  # likely: 104 MW (r 0.91)
+    "RAILBEDWF-LT.AG_SR": ["South Kent Wind Farm"],    # likely: 270 MW (r 0.87)
 }
 
 _STOP = {"wind", "energy", "project", "farm", "centre", "center", "power", "generating", "station", "gs",

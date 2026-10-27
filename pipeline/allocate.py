@@ -8,6 +8,7 @@ Output: web/data/generation.json
   hours     – UTC end-of-hour timestamps
   totals    – {fuel: [MW per hour]} summed straight from the BA reports
   series    – {plant id: [estimated MW, or null where the BA didn't report]}
+  unreported – plant ids its grid operator's figures leave out (null throughout)
   weather   – {plant id: [hub wind m/s (wind) or sunshine W/m² (solar)]}
   weighting – "weather", or "capacity" if no weather was available
 """
@@ -156,7 +157,7 @@ def build(source="EIA-930", weather=None):
         totals[(ba, fuel)] = arr
 
     series, plant_weather = {}, {}
-    matched = set()
+    matched, unreported = set(), []
     # Capacity of plants whose BA reported each hour: in live-only hours the
     # regions EIA hasn't published yet drop out, and the map says so.
     covered = {fuel: np.zeros(len(hours)) for fuel in FUELS}
@@ -166,7 +167,6 @@ def build(source="EIA-930", weather=None):
             continue  # no EIA-930 data for this BA and fuel (e.g. Alaska, Hawaii)
         matched.add((ba, fuel))
         caps = group["cap"].to_numpy(dtype=float)
-        covered[fuel] += caps.sum() * ~np.isnan(ba_total)
 
         # hours × plants matrix of expected capacity factors, or None.
         cf = None
@@ -185,9 +185,17 @@ def build(source="EIA-930", weather=None):
         # the region's total is split among the rest as usual.
         has_meter = group["id"].isin(metered).to_numpy()
         free = ~has_meter
+        reported = ~np.isnan(ba_total)
         if has_meter.any():
             meter = np.column_stack([metered[pid] for pid in group["id"][has_meter]])
             ba_total = ba_total - np.nansum(meter, axis=1)
+            # Every reported MW already sits on a metered plant, so the others aren't in the
+            # grid operator's figures at all (in Ontario, farms on local distribution grids):
+            # they show as not reporting rather than as idle.
+            if np.nanmax(np.abs(ba_total), initial=0) < 1:
+                unreported += group["id"][free].tolist()
+                free[:] = False
+        covered[fuel] += caps[has_meter | free].sum() * reported
 
         est = np.full((len(hours), len(caps)), np.nan)
         for i, total in enumerate(ba_total):
@@ -225,6 +233,8 @@ def build(source="EIA-930", weather=None):
         "eia_until": stamp(eia_until),
         "live": live,
         "metered": sorted(metered),
+        # Plants in a reporting region that its grid operator's figures leave out.
+        "unreported": sorted(unreported),
         "flows": aligned_flows(hours),
         "series": series,
         "weather": plant_weather,

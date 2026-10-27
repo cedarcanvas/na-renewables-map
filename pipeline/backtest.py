@@ -9,7 +9,10 @@ split by capacity alone is the baseline the weather weighting has to beat.
 
 A unit is what one meter measures: usually one farm, but where one meter code
 covers several farms, or one farm reports under several codes, they make one
-unit, so no "reading" is itself a capacity split.
+unit, so no "reading" is itself a capacity split. Units are scored at the grid
+operator's capacity; where the plant list disagrees with it, the codes are
+probably matched to the wrong plants (ontario.py, alberta.py), and the unit is
+listed instead of scored.
 
     python -m pipeline.backtest            # the hours already on disk (back to the last --days run)
     python -m pipeline.backtest --days 21  # first fetch 21 days of Ontario readings and weather
@@ -42,23 +45,24 @@ TESTED = ("wind", "solar")
 # Solar hours count only when a province's farms make at least this share of capacity:
 # at night both splits are trivially right.
 DAYLIGHT = 0.02
-# A reading above this multiple of listed capacity means the meter and the plant don't match
-# (or the listed capacity is wrong); so does a peak below LOW_PEAK over two weeks or more,
-# when healthy farms all reach 80–100%. Such units are scored separately.
-CAPACITY_SUSPECT = 1.1
-LOW_PEAK, LOW_PEAK_SPAN = 0.7, pd.Timedelta(days=14)
+# Units are scored at the grid operator's capacity for their codes (IESO's most available MW,
+# AESO's maximum capability), as a US region's plants are at EIA-860M's. Where the plant
+# list's capacity differs from it by more than this, the meter and the plants don't match
+# (or the list is wrong), and the unit is scored separately.
+CAPACITY_MISMATCH = 0.15
 
 
 def ontario_readings(start, plants):
-    """IESO's hourly output per generator code, and {code: [plant ids]}."""
+    """IESO's hourly output per generator code, {code: [plant ids]} and {code: capacity}."""
     days = pd.date_range(start.tz_convert("EST").normalize(), pd.Timestamp.now(tz="EST").normalize())
     df = pd.concat([_report(d.date()) for d in days], ignore_index=True)
     df = df[df["Fuel Type"].isin(["WIND", "SOLAR"]) & df["Output MW"].notna()]
+    capacity = df.groupby("Generator Name")["Available Capacity MW"].max().dropna().to_dict()
     df = pd.DataFrame({"utc": pd.to_datetime(df["Interval End"], utc=True), "code": df["Generator Name"],
                        "fuel": df["Fuel Type"].map(ontario.IESO_FUELS), "mw": df["Output MW"]})
     links = ontario.crosswalk(df[["code", "fuel"]].drop_duplicates().itertuples(index=False),
                               plants[plants["ba"] == "IESO"])
-    return df[df["utc"] >= start], {code: ids for (code, _), ids in links.items()}
+    return df[df["utc"] >= start], {code: ids for (code, _), ids in links.items()}, capacity
 
 
 def _report(day, tries=4):
@@ -73,13 +77,14 @@ def _report(day, tries=4):
 
 
 def alberta_readings(start, plants):
-    """AESO's per-asset snapshots as end-of-hour values, and {code: [plant ids]}."""
+    """AESO's per-asset snapshots as end-of-hour values, {code: [plant ids]} and {code: capacity}."""
     if not snapshots.SNAPSHOTS_CSV.exists():
-        return pd.DataFrame(columns=["utc", "code", "fuel", "mw"]), {}
+        return pd.DataFrame(columns=["utc", "code", "fuel", "mw"]), {}, {}
     s = snapshots.hourly(pd.read_csv(snapshots.SNAPSHOTS_CSV, parse_dates=["utc"]))
     s = s[(s["source"] == "AESO") & (s["kind"] == "asset") & s["fuel"].isin(TESTED) & (s["utc"] >= start)]
-    links = alberta.crosswalk(pd.read_csv(snapshots.ASSETS_CSV), plants[plants["ba"] == "AESO"])
-    return s.rename(columns={"key": "code"})[["utc", "code", "fuel", "mw"]], links
+    assets = pd.read_csv(snapshots.ASSETS_CSV)
+    links = alberta.crosswalk(assets, plants[plants["ba"] == "AESO"])
+    return s.rename(columns={"key": "code"})[["utc", "code", "fuel", "mw"]], links, assets.set_index("code")["mc"].to_dict()
 
 
 def meter_groups(links):
@@ -95,7 +100,7 @@ def meter_groups(links):
     return groups
 
 
-def unit_table(province, links, plants):
+def unit_table(province, links, plants, capacity):
     p = plants.set_index("id")
     rows = []
     for codes, pids in meter_groups(links):
@@ -103,8 +108,11 @@ def unit_table(province, links, plants):
         if p.at[pids[0], "fuel"] not in TESTED:
             continue
         more = f" (+{len(pids) - 1} more)" if len(pids) > 1 else ""
+        listed = p.loc[pids, "cap"].sum()
+        known = [capacity.get(c, 0) for c in codes]
         rows.append({"unit": p.at[pids[0], "name"][:38 - len(more)] + more, "province": province, "fuel": p.at[pids[0], "fuel"],
-                     "cap": p.loc[pids, "cap"].sum(), "plants": pids, "codes": sorted(codes)})
+                     "cap": sum(known) if all(k > 0 for k in known) else listed, "listed": listed,
+                     "plants": pids, "codes": sorted(codes)})
     return pd.DataFrame(rows)
 
 
@@ -151,7 +159,8 @@ def test_group(units, readings, grid, curve, cells, cap):
     n_h, n_u = meter.shape
     out = pd.DataFrame({
         "utc": np.repeat(hours, n_u), "province": units["province"].iloc[0], "fuel": units["fuel"].iloc[0],
-        "unit": np.tile(units["unit"], n_h), "cap": np.tile(caps, n_h), "local": local.ravel(),
+        "unit": np.tile(units["unit"], n_h), "cap": np.tile(caps, n_h), "listed": np.tile(units["listed"], n_h),
+        "local": local.ravel(),
         "mw": meter.ravel(), "est_weather": est_w.ravel(), "est_capacity": est_c.ravel(),
     })
     return out.dropna(subset=["est_weather"])
@@ -176,15 +185,17 @@ def scores(df):
 
 
 def mismatched(df):
-    """Units whose meter doesn't fit their listed capacity: {(province, fuel, unit): reason}."""
-    per = df.groupby(["province", "fuel", "unit"]).agg(cap=("cap", "first"), peak=("mw", "max"),
-                                                       first=("utc", "min"), last=("utc", "max"))
+    """Units whose plants don't fit their meter: {(province, fuel, unit): reason}."""
+    per = df.groupby(["province", "fuel", "unit"]).agg(cap=("cap", "first"), listed=("listed", "first"),
+                                                       peak=("mw", "max"))
+    # IESO's figure is what was available, so a farm with turbines out all window shows here too.
+    operator = {"ON": "IESO had at most {:.0f} MW available", "AB": "AESO lists {:.0f} MW"}
     out = {}
-    for key, r in per.iterrows():
-        if r["peak"] > CAPACITY_SUSPECT * r["cap"]:
-            out[key] = f"listed {r['cap']:.0f} MW, read up to {r['peak']:.0f} MW"
-        elif r["last"] - r["first"] >= LOW_PEAK_SPAN and r["peak"] < LOW_PEAK * r["cap"]:
-            out[key] = f"listed {r['cap']:.0f} MW, never above {r['peak']:.0f} MW: the meter may cover only part of it"
+    for (prov, fuel, unit), r in per.iterrows():
+        if abs(r["listed"] / r["cap"] - 1) > CAPACITY_MISMATCH:
+            out[(prov, fuel, unit)] = f"listed {r['listed']:.0f} MW; " + operator[prov].format(r["cap"])
+        elif r["peak"] > 1.1 * r["cap"]:
+            out[(prov, fuel, unit)] = f"{r['cap']:.0f} MW, read up to {r['peak']:.0f} MW"
     return out
 
 
@@ -193,7 +204,7 @@ def report(df):
     odd = mismatched(df)
     fits = ~df.set_index(["province", "fuel", "unit"]).index.isin(list(odd))
     print(f"\nScores, {df['utc'].min():%Y-%m-%d %H:%M} to {df['utc'].max():%Y-%m-%d %H:%M} UTC "
-          f"(solar: daylight hours only; units whose meter fits their listed capacity)")
+          f"(solar: daylight hours only; units whose plants fit their meter)")
     print(f"{'':16s}{'units':>6s}{'hours':>7s}  {'error, % of capacity':>22s}  {'error, % of output':>20s}"
           f"  {'weather':>8s}  {'timing (median r)':>18s}")
     print(f"{'':29s}{'weather':>11s}{'capacity':>11s}{'weather':>10s}{'capacity':>10s}  {'better by':>9s}"
@@ -225,7 +236,7 @@ def report(df):
         print(f"  {'':6s}actual      " + "".join(f"{v:>6.2f}" for v in t["actual"]))
         print(f"  {'':6s}curve       " + "".join(f"{v:>6.2f}" for v in t["curve"]))
 
-    print("\nUnits the weather split misses most (mean error and bias, % of listed capacity)")
+    print("\nUnits the weather split misses most (mean error and bias, % of capacity)")
     per = clean.assign(err=(clean["est_weather"] - clean["mw"]).abs(), bias=clean["est_weather"] - clean["mw"]).groupby(
         ["province", "fuel", "unit"]).agg(cap=("cap", "first"), err=("err", "mean"), bias=("bias", "mean"),
                                           made=("mw", "mean"))
@@ -235,7 +246,7 @@ def report(df):
               f"bias {r['bias']:+6.1%}  made {r['made']:5.1%} of capacity on average")
 
     if odd:
-        print("\nMeter and plant don't match (left out of the scores above):")
+        print("\nPlant list and grid operator disagree on capacity (left out of the scores above):")
         for (prov, fuel, unit), reason in odd.items():
             print(f"  {prov} {fuel:5s} {unit:38s} {reason}")
 
@@ -252,8 +263,9 @@ def build(days=None):
     cells = wx.plant_cells()
 
     tested = []
-    for province, (readings, links) in (("ON", ontario_readings(start, plants)), ("AB", alberta_readings(start, plants))):
-        units = unit_table(province, links, plants)
+    for province, (readings, links, capacity) in (("ON", ontario_readings(start, plants)),
+                                                  ("AB", alberta_readings(start, plants))):
+        units = unit_table(province, links, plants, capacity)
         print(f"{province}: {len(units)} metered wind and solar units, {readings['utc'].nunique()} hours of readings")
         tested.append((province, readings, units))
 

@@ -10,6 +10,7 @@ OpenStreetMap (ODbL) instead, since most were built after 2017.
 Each plant's `ba` is its province's grid region code, matching regions.py.
 """
 
+import json
 import re
 
 import pandas as pd
@@ -33,6 +34,18 @@ PROVINCES = {
     "British Columbia": ("BC", "BCHA"),
 }
 ABBREV = {abbr: name for name, (abbr, _) in PROVINCES.items()}
+
+# Wind projects whose phases IESO reports separately: name -> {commissioning year: phase name}.
+WIND_PHASES = {"Grand Valley": {2012: "Grand Valley 1 & 2", 2015: "Grand Valley 3"}}
+
+# Ontario solar farms newer than the 2017 NACEI layer that IESO reports, so their readings
+# have a plant to land on. Locations: OpenStreetMap (ODbL), Global Energy Monitor.
+EXTRA_PLANTS = [
+    {"name": "Loyalist Solar", "fuel": "solar", "cap": 54.0, "province": "Ontario",
+     "lat": 44.3386, "lon": -76.9761, "op_year": 2019},   # OSM way 1081537364
+    {"name": "Nanticoke Solar", "fuel": "solar", "cap": 44.0, "province": "Ontario",
+     "lat": 42.8001, "lon": -80.0503, "op_year": 2019},   # former Nanticoke coal station
+]
 
 
 def _query(layer_url, where):
@@ -68,6 +81,10 @@ def wind_projects():
                      ("Longitude", "lon"), ("Total_Project_Capacity_MW", "project_mw")):
         t[col] = pd.to_numeric(t[src], errors="coerce")
     t["year"] = pd.to_numeric(t["Commissioning"].astype(str).str[:4], errors="coerce")
+    # Split phased projects; a phase's capacity is then its turbines' sum, not the project's.
+    phase = pd.Series([WIND_PHASES.get(n, {}).get(y) for n, y in zip(t["Project_Name"], t["year"])], index=t.index)
+    t.loc[phase.notna(), "Project_Name"] = phase
+    t.loc[phase.notna(), "project_mw"] = float("nan")
     g = t.groupby(["Province_Territory", "Project_Name"]).agg(
         lat=("lat", "mean"), lon=("lon", "mean"), turbines=("kw", "size"),
         turbine_mw=("kw", lambda s: s.sum() / 1000), project_mw=("project_mw", "first"),
@@ -114,10 +131,21 @@ def osm_solar(province_code="CA-AB"):
         area["ISO3166-2"="{province_code}"]->.a;
         nwr["power"="plant"]["plant:source"="solar"](area.a);
         out center tags;"""
-    r = requests.post(OVERPASS, data={"data": query}, headers={"User-Agent": OVERPASS_AGENT}, timeout=180)
-    r.raise_for_status()
+    # A busy Overpass shouldn't cost the map all of Canada's plants: fall back to the last answer.
+    cache = RAW / "osm" / f"solar-{province_code}.json"
+    try:
+        r = requests.post(OVERPASS, data={"data": query}, headers={"User-Agent": OVERPASS_AGENT}, timeout=180)
+        r.raise_for_status()
+        elements = r.json()["elements"]
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps(elements))
+    except (requests.RequestException, ValueError) as e:
+        if not cache.exists():
+            raise
+        print(f"  OpenStreetMap solar for {province_code} unavailable ({type(e).__name__}); using the saved copy")
+        elements = json.loads(cache.read_text())
     rows = []
-    for e in r.json()["elements"]:
+    for e in elements:
         tags, centre = e.get("tags", {}), e.get("center", e)
         rows.append({
             "name": tags.get("name") or f"Solar farm (OSM {e['type']} {e['id']})", "fuel": "solar",
@@ -133,7 +161,8 @@ def plants():
     nacei = hydro_solar_plants()
     # Alberta's solar comes from OpenStreetMap instead of the 2017 layer.
     nacei = nacei[~((nacei["province"] == "Alberta") & (nacei["fuel"] == "solar"))]
-    df = pd.concat([wind_projects(), nacei, osm_solar("CA-AB")], ignore_index=True)
+    extra = pd.DataFrame(EXTRA_PLANTS).assign(units=1, hub_m=float("nan"))
+    df = pd.concat([wind_projects(), nacei, osm_solar("CA-AB"), extra], ignore_index=True)
     df = df[df["province"].isin(PROVINCES) & df["lat"].notna() & df["lon"].notna() & (df["cap"] > 0)]
     features = []
     for p in df.itertuples():

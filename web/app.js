@@ -900,6 +900,8 @@ function popupNote(p, mw, weighted) {
   const live = state.gen.live?.[p.ba];
   if (mw == null && live && state.gen.hours[state.hour] > live.until)
     return `No data for this hour yet: ${live.feed}'s live feed runs a little behind the others.`;
+  if (state.gen.unreported?.includes(p.id))
+    return `Not reported: ${live?.feed ?? region} publishes output only for plants on its transmission grid, and most smaller farms feed local distribution grids instead.`;
   if (mw == null) return `No data for this hour yet: ${region}'s figures haven't been published.`;
   if (state.gen.metered?.includes(p.id)) {
     const reading = SNAPSHOT_FEEDS.has(live?.feed) ? "reading for this plant, taken just after the hour"

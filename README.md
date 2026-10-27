@@ -23,7 +23,8 @@ Other regions show as "no data" (grey outlines) until EIA publishes them.
 
 Canada: Ontario's and Alberta's large plants show **metered** output, from
 IESO's hourly per-generator report and AESO's per-asset Current Supply Demand
-report. Québec's production by source comes from Hydro-Québec's
+report. Farms on local distribution grids, which neither report, show as
+not reporting. Québec's production by source comes from Hydro-Québec's
 open data and is split across its plants like a US region, and Hydro-Québec's
 hourly flows to New England, New York, Ontario and New Brunswick are drawn as
 arcs (deck.gl), with New Brunswick's scheduled interchange and Nova Scotia's
@@ -74,14 +75,15 @@ system, wind is drawn as still streaks.
 
 Ontario and Alberta meter every large wind and solar farm, so they double as a
 test: `pipeline/backtest.py` hands `allocate()` only a province's total, as if
-it were a US region, and compares its split with each farm's meter. Four weeks
-of Ontario (29 Sep to 27 Oct 2026, farms whose meter matches their listed
-capacity):
+it were a US region, and compares its split with each farm's meter. Farms are
+scored at the grid operator's capacity (IESO's most available MW, AESO's
+maximum capability), as US plants are split by EIA-860M's. Four weeks of
+Ontario (29 Sep to 27 Oct 2026):
 
 | | Farms | Error, % of capacity: weather split | Capacity-only split | Weather is better by |
 |---|---|---|---|---|
-| Wind | 31 | 8.7% | 15.1% | 42% |
-| Solar (daylight) | 4 | 8.8% | 11.3% | 22% |
+| Wind | 41 | 8.6% | 14.4% | 40% |
+| Solar (daylight) | 7 | 9.1% | 11.1% | 18% |
 
 A typical wind farm-hour is still off by over a quarter of what the farm made,
 so read single plants as rough and regions as solid. The farm curve in
@@ -89,11 +91,13 @@ so read single plants as rough and regions as solid. The farm curve in
 for a split: a curve fitted to Ontario's farms scored the same on held-out
 hours. Coarse weather cost more: wind used to come from 0.5° cells, where
 nearby farms shared one wind speed; on 0.1° cells (one point per farm, in
-effect) Ontario's wind error fell from 10.3% to 8.7% of capacity. The test
-also lists meters that don't fit their plants (Port Alma's two codes on one
-plant, for example), which are matching problems in `ontario.py`, not
-estimation errors. Alberta's history is what
-`snapshots.py` keeps (now 30 days), so its scores firm up over the month.
+effect) the wind error on the 31 farms tested then fell from 10.3% to 8.7% of
+capacity. The test also lists farms whose listed capacity disagrees with the
+grid operator's, which is how it found IESO codes matched to the wrong plants
+in `ontario.py` (Port Alma's two codes on one farm, a 99 MW code on a 59 MW
+farm); those are now matched by IESO's capacity and by whose local wind each
+code's output follows. Alberta's history is what `snapshots.py` keeps (now 30
+days), so its scores firm up over the month.
 
 ```bash
 .venv/bin/python -m pipeline.backtest --days 28   # fetch 4 weeks of Ontario readings and weather, then score
@@ -109,7 +113,7 @@ estimation errors. Alberta's history is what
 | Live fuel mix for CAISO, ERCOT, SPP, MISO, NYISO, ISO-NE (and PJM with a key) | the ISOs' public feeds via [gridstatus](https://github.com/gridstatus/gridstatus) | every 5 minutes (PJM hourly); SPP an hour or two behind |
 | Bonneville (BPA) wind + solar and hydro | [BPA's 5-minute BA data](https://transmission.bpa.gov/business/operations/wind/baltwg.txt) | every 5 minutes |
 | Canadian wind farms | NRCan [Canadian Wind Turbine Database](https://open.canada.ca/data/en/dataset/79fdad93-9025-49ad-ba16-c26d718cc070) (map service) | monthly with plants |
-| Canadian hydro and solar plants | NACEI renewable plants ≥ 1 MW (2017; thin for newer solar) | monthly with plants |
+| Canadian hydro and solar plants | NACEI renewable plants ≥ 1 MW (2017; thin for newer solar), plus Ontario's Loyalist and Nanticoke solar farms (`EXTRA_PLANTS` in `canada.py`) | monthly with plants |
 | Ontario output per generator | IESO Generator Output and Capability report, via gridstatus; codes matched to plants in `pipeline/ontario.py` | hourly |
 | Alberta output per asset | AESO [Current Supply Demand](http://ets.aeso.ca/ets_web/ip/Market/Reports/CSDReportServlet), read each run; assets matched to plants in `pipeline/alberta.py` | snapshot per run |
 | Alberta solar farm locations | [OpenStreetMap](https://www.openstreetmap.org/copyright) via Overpass (ODbL) | monthly with plants |
