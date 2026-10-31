@@ -39,7 +39,9 @@ BC, Manitoba and Newfoundland and Labrador show capacity only.
 `web/` is static: MapLibre for the map, deck.gl for Québec's flow arcs, and a
 canvas over the map for wind particles (`weather.js`, the technique behind
 earth.nullschool and Windy). Layers: plants (outline = capacity, fill = the
-hour's output), grid regions, transmission lines, Québec flows, wind at 100 m,
+hour's output, circle area ∝ MW; "Normalized" draws every ring the same size,
+filled by share of capacity, and "Exponential" sizes by MW^0.75 so differences
+stand out), grid regions, transmission lines, Québec flows, wind at 100 m,
 cloud cover, and wind roses and sun arcs. Transmission lines come as vector
 tiles in one PMTiles file (read with the pmtiles library, so a plain static
 server still works), drawn as fine dotted lines (white on the dark map, grey on the
@@ -199,7 +201,7 @@ Region codes that differ between the two EIA datasets are mapped in
 ## Next
 
 - Per-farm hub heights from the US Wind Turbine Database instead of a flat 100 m
-- From the GB map: Normalise and colour-scale display options, curtailment,
+- From the GB map: a colour-scale display option, curtailment,
   outage notices, pressure / temperature / solar radiation layers, forecast
   hours, satellite imagery, individual turbines
 - Hosting

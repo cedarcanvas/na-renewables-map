@@ -19,13 +19,23 @@ const state = {
 const $ = (sel) => document.querySelector(sel);
 const fmt = (n, digits = 0) => n.toLocaleString("en-US", { maximumFractionDigits: digits, minimumFractionDigits: digits });
 
-// Circle area ∝ MW, so radius ∝ √MW, growing with zoom.
-const radius = (mw) => [
-  "interpolate", ["exponential", 1.6], ["zoom"],
-  3, ["*", 0.22, ["sqrt", mw]],
-  7, ["*", 0.9, ["sqrt", mw]],
-  11, ["*", 4, ["sqrt", mw]],
-];
+// Plant circles. By default area ∝ MW (radius ∝ √MW), growing with zoom. "Exponential"
+// raises MW to a higher power, so differences stand out (areas no longer match MW);
+// "normalized" draws every capacity ring the size of a 100 MW plant's and fills it by the
+// plant's share of capacity. Both match the default size at 100 MW.
+const symbols = { normalized: false, exponential: false };
+const RADIUS_PER_ROOT_MW = { 3: 0.22, 7: 0.9, 11: 4 };
+const NORMAL_MW = 100;
+const radius = (mw) => {
+  const p = symbols.exponential ? 0.75 : 0.5;
+  const scaled = ["*", NORMAL_MW ** (0.5 - p), ["^", ["max", mw, 0], p]];
+  return ["interpolate", ["exponential", 1.6], ["zoom"],
+    ...Object.entries(RADIUS_PER_ROOT_MW).flatMap(([z, k]) => [Number(z), ["*", k, scaled]])];
+};
+const ringRadius = () => radius(symbols.normalized ? NORMAL_MW : ["get", "cap"]);
+const fillRadius = () => radius(symbols.normalized
+  ? ["*", NORMAL_MW, ["min", ["/", ["get", "mw"], ["get", "cap"]], 1]]
+  : ["get", "mw"]);
 const fuelColor = ["match", ["get", "fuel"], ...Object.entries(FUELS).flatMap(([k, f]) => [k, f.color]), "#888"];
 // Below this share of a fuel's capacity reporting, its total is marked partial.
 const PARTIAL = 0.9;
@@ -377,7 +387,7 @@ function addPlantLayers() {
     source: "plants",
     layout: { "circle-sort-key": ["-", ["get", "cap"]] },
     paint: {
-      "circle-radius": radius(["get", "cap"]),
+      "circle-radius": ringRadius(),
       "circle-color": ringColor(),
       "circle-opacity": 0.08,
       "circle-stroke-color": ringColor(),
@@ -392,18 +402,49 @@ function addPlantLayers() {
     filter: [">", ["get", "mw"], 0],
     layout: { "circle-sort-key": ["-", ["get", "mw"]] },
     paint: {
-      "circle-radius": radius(["get", "mw"]),
+      "circle-radius": fillRadius(),
       "circle-color": fuelColor,
       "circle-opacity": 0.8,
     },
   });
   applyFuelFilter();
+  setUpSymbolOptions();
 
   for (const layer of ["capacity", "output"]) {
     map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
     map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
   }
   map.on("click", "capacity", (e) => showPopup(e.features[0].properties.id));
+}
+
+const SYMBOL_NOTES = {
+  "normalized": "Every plant's ring is the same size; the fill shows its share of capacity.",
+  "exponential": "Sizes grow faster than MW (radius ∝ MW^0.75), so differences stand out; areas no longer match MW.",
+  "normalized exponential": "Same-size rings; fills grow faster than share of capacity, so differences stand out.",
+};
+
+// The Normalized and Exponential checkboxes; the choice is remembered in this browser.
+function setUpSymbolOptions() {
+  try {
+    Object.assign(symbols, JSON.parse(localStorage.getItem("symbols") ?? "{}"));
+  } catch { /* storage blocked or malformed: defaults */ }
+  for (const key of Object.keys(symbols)) {
+    const box = $(`#sym-${key}`);
+    box.checked = Boolean(symbols[key]);
+    box.addEventListener("change", () => {
+      symbols[key] = box.checked;
+      try { localStorage.setItem("symbols", JSON.stringify(symbols)); } catch { /* not remembered */ }
+      applySymbols();
+    });
+  }
+  applySymbols();
+}
+
+function applySymbols() {
+  map.setPaintProperty("capacity", "circle-radius", ringRadius());
+  map.setPaintProperty("output", "circle-radius", fillRadius());
+  const on = Object.keys(symbols).filter((k) => symbols[k]).join(" ");
+  $("#sym-note").textContent = SYMBOL_NOTES[on] ?? "";
 }
 
 // --- Data for the selected hour -------------------------------------------

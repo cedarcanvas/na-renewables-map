@@ -275,3 +275,7 @@ footer a { color: inherit; }
 .sun-chart-plot { display: block; touch-action: none; }
 .sun-chart .note { max-width: none; font-variant-numeric: tabular-nums; }
 .layers { display: flex; flex-wrap: wrap; row-gap: 4px; }
+.layers + .layers { margin-top: 6px; }
+.layers > .muted { margin-right: 10px; }
+#sym-note { flex-basis: 100%; margin: 2px 0 0; }
+#sym-note:empty { display: none; }
