@@ -34,6 +34,16 @@
       <p id="coverage" class="muted small"></p>
     </section>
 
+    <section class="layers small" aria-label="Map layers">
+      <label><input type="checkbox" id="show-regions" checked> Grid regions</label>
+      <label><input type="checkbox" id="show-flows" checked> Cross-border flows</label>
+      <label><input type="checkbox" id="show-lines" checked> Transmission lines</label>
+      <label hidden><input type="checkbox" id="show-wind" checked> Wind at 100 m</label>
+      <label hidden><input type="checkbox" id="show-clouds"> Cloud cover</label>
+      <label hidden><input type="checkbox" id="show-roses"> Wind roses</label>
+      <label hidden><input type="checkbox" id="show-sun"> Sun arcs</label>
+    </section>
+
     <section aria-labelledby="kpi-title">
       <h2 id="kpi-title">Generation this hour</h2>
       <div id="kpis" class="kpi-grid"></div>
@@ -53,16 +63,6 @@
         <summary>Hourly values as a table</summary>
         <div class="scroll"><table id="history-table" class="data-table"></table></div>
       </details>
-    </section>
-
-    <section class="layers small">
-      <label><input type="checkbox" id="show-regions" checked> Grid regions</label>
-      <label><input type="checkbox" id="show-flows" checked> Cross-border flows</label>
-      <label><input type="checkbox" id="show-lines" checked> Transmission lines</label>
-      <label hidden><input type="checkbox" id="show-wind" checked> Wind at 100 m</label>
-      <label hidden><input type="checkbox" id="show-clouds"> Cloud cover</label>
-      <label hidden><input type="checkbox" id="show-roses"> Wind roses</label>
-      <label hidden><input type="checkbox" id="show-sun"> Sun arcs</label>
     </section>
 
     <section id="map-key" class="card small" aria-labelledby="key-title" hidden>

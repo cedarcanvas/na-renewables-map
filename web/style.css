@@ -60,7 +60,7 @@ html, body {
 
 body {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: clamp(360px, 34vw, 460px) 1fr;
   height: 100vh;
 }
 

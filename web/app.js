@@ -413,13 +413,16 @@ function mwFor(id) {
   return s ? s[state.hour] : null;
 }
 
+// Only what the plant layers read: each hour's data is copied to MapLibre's worker, and
+// copying every property (names, regions, years) blocked the page for ~50 ms an hour.
+// Popups look plants up in state.plants by id.
 function featuresForHour() {
   return {
     type: "FeatureCollection",
-    features: state.plants.features.map((f) => ({
+    features: state.plants.features.map(({ geometry, properties: { id, fuel, cap } }) => ({
       type: "Feature",
-      geometry: f.geometry,
-      properties: { ...f.properties, mw: mwFor(f.properties.id) ?? -1 },
+      geometry,
+      properties: { id, fuel, cap, mw: mwFor(id) ?? -1 },
     })),
   };
 }
@@ -433,19 +436,24 @@ function setHour(i) {
   renderPanel();
 }
 
+// Each played hour lasts this long; the wind particles blend between hours over it.
+const PLAY_STEP_MS = 400;
+
 function play() {
   $("#play").textContent = "❚❚";
   if (state.hour >= state.gen.hours.length - 1) setHour(0);
   state.playing = setInterval(() => {
     if (state.hour >= state.gen.hours.length - 1) return stop();
     setHour(state.hour + 1);
-  }, 350);
+  }, PLAY_STEP_MS);
+  updateWeather(); // start blending toward the next hour now, not after the first step
 }
 
 function stop() {
   clearInterval(state.playing);
   state.playing = null;
   $("#play").textContent = "▶";
+  updateWeather();
 }
 
 function applyFuelFilter() {

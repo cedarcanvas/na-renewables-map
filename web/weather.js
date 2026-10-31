@@ -65,12 +65,14 @@ function weatherFrame() {
   return weather.meta.hours.indexOf(state.gen.hours[state.hour]);
 }
 
-// Called by setHour in app.js.
+// Called by setHour in app.js, and by play() and stop(). While the hours play, the wind
+// eases toward the next hour's field over one step, so the particles turn instead of jumping.
 function updateWeather() {
   weather.sunArcs?.render(); // sun.js; needs no GFS data
   if (!weather.meta) return;
   const f = weatherFrame();
-  weather.particles?.setField(f >= 0 ? weather.frames[f] : null);
+  const next = state.playing && f >= 0 ? weather.frames[f + 1] ?? null : null;
+  weather.particles?.setField(f >= 0 ? weather.frames[f] : null, next);
   weather.roses?.render(); // the needle follows the selected hour
   const key = f >= 0 ? weather.meta.hours[f].replace(/[-T:Z]/g, "").slice(0, 10) : null;
   const file = key && weather.meta.clouds.files[key];
@@ -105,6 +107,8 @@ class WindParticles {
   constructor(map) {
     this.map = map;
     this.field = null;
+    this.next = null;   // the following hour's field while playing, blended in over PLAY_STEP_MS
+    this.t = 0;
     this.visible = true;
     this.moving = false;
     this.canvas = document.createElement("canvas");
@@ -134,9 +138,13 @@ class WindParticles {
     this.reseed();
   }
 
-  setField(field) {
+  // A new hour keeps the particles and their trails, so the flow carries on into it.
+  setField(field, next = null) {
+    const fresh = !this.field;
     this.field = field;
-    this.reseed();
+    this.next = next;
+    this.since = performance.now();
+    if (fresh || reducedMotion.matches) this.reseed();
   }
 
   setVisible(on) {
@@ -165,7 +173,8 @@ class WindParticles {
     }
   }
 
-  // Bilinear wind at a lon/lat from the GFS grid, or null outside it.
+  // Bilinear wind at a lon/lat from the GFS grid (blended toward the next hour by this.t),
+  // or null outside it.
   sample(lng, lat) {
     const w = weather.meta.wind;
     const gx = (lng - w.west) / w.step;
@@ -174,7 +183,9 @@ class WindParticles {
     const x0 = Math.floor(gx), y0 = Math.floor(gy), fx = gx - x0, fy = gy - y0;
     const i = y0 * w.nx + x0;
     const mix = (a) => (a[i] * (1 - fx) + a[i + 1] * fx) * (1 - fy) + (a[i + w.nx] * (1 - fx) + a[i + w.nx + 1] * fx) * fy;
-    return [mix(this.field.u), mix(this.field.v)];
+    const u = mix(this.field.u), v = mix(this.field.v);
+    if (!this.t) return [u, v];
+    return [u + (mix(this.next.u) - u) * this.t, v + (mix(this.next.v) - v) * this.t];
   }
 
   // Advance every particle one frame and draw its segment, in three brightness bands by speed.
@@ -186,6 +197,7 @@ class WindParticles {
       ctx.fillRect(0, 0, this.w, this.h);
       ctx.globalCompositeOperation = "source-over";
     }
+    this.t = this.next ? Math.min((performance.now() - this.since) / PLAY_STEP_MS, 1) : 0;
     const bands = [new Path2D(), new Path2D(), new Path2D()];
     for (const p of this.particles) {
       const ll = this.map.unproject([p.x, p.y]);
