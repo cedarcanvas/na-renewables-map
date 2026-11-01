@@ -9,7 +9,7 @@ import sys
 import time
 
 from . import allocate, generation, gfs, plants, regions, transmission, weather
-from .common import PLANTS_GEOJSON
+from .common import PLANTS_GEOJSON, PUBLIC_BA_GENERATION_CSV, PUBLIC_GENERATION_JSON
 
 PLANTS_MAX_AGE_DAYS = 30
 
@@ -35,6 +35,8 @@ def main(argv):
         print(f"Weather fetch failed ({e}); using cached weather where it covers these hours, else capacity only")
         wx = None
     allocate.build(source, wx)
+    # The public copy's estimates (publish.py), without PJM's live feed.
+    allocate.build(source, wx, PUBLIC_BA_GENERATION_CSV, PUBLIC_GENERATION_JSON)
     try:
         gfs.build()  # wind and cloud layers for the map; not needed for the estimates
     except Exception as e:

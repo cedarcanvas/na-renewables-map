@@ -18,6 +18,10 @@ fi
   # gridstatus logs every URL it fetches at INFO level; those lines are noise here.
   .venv/bin/python -m pipeline.run 2>&1 | grep -v -- " - INFO - "
   status=${PIPESTATUS[0]}
+  # The public copy's data (maps.ridgelinemaps.com/renewables/); a no-op until set up.
+  if [ "$status" -eq 0 ]; then
+    .venv/bin/python -m pipeline.publish 2>&1 || echo "publish failed (exit $?)"
+  fi
   echo "=== $(date '+%Y-%m-%d %H:%M:%S %Z') exit $status"
 } >> "$LOG"
 exit "$status"

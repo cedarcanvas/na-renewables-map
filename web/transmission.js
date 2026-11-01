@@ -18,7 +18,7 @@ const lineWidth = () => ["interpolate", ["linear"], ["zoom"],
   ...Object.entries(LINE_WIDTHS).flatMap(([z, widths]) => [Number(z), byClass(widths)])];
 
 async function addTransmissionLayers() {
-  const url = new URL("data/transmission.pmtiles", location.href).href;
+  const url = dataURL("transmission.pmtiles");
   if (typeof pmtiles === "undefined" || !(await fetch(url, { method: "HEAD" }).then((r) => r.ok, () => false))) {
     $("#show-lines").closest("label").hidden = true; // not built yet: python -m pipeline.transmission
     return;

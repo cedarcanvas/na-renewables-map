@@ -17,7 +17,7 @@ const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 async function addWeatherLayers() {
   try {
-    weather.meta = await loadJSON("data/weather/meta.json");
+    weather.meta = await loadJSON(dataURL("weather/meta.json"));
     weather.frames = await loadWindFrames(weather.meta.wind);
   } catch {
     return; // not built yet: python -m pipeline.gfs
@@ -37,7 +37,8 @@ async function addWeatherLayers() {
 // The wind image stacks every hour top to bottom: red = u, green = v, 0–255 for ±range m/s.
 async function loadWindFrames(w) {
   const img = new Image();
-  img.src = `data/weather/${w.file}?${weather.meta.hours.at(-1)}`;
+  img.crossOrigin = "anonymous"; // its pixels are read back, which a data host on another origin must allow
+  img.src = `${dataURL(`weather/${w.file}`)}?${weather.meta.hours.at(-1)}`;
   await img.decode();
   const canvas = document.createElement("canvas");
   canvas.width = img.width;
@@ -77,7 +78,7 @@ function updateWeather() {
   const key = f >= 0 ? weather.meta.hours[f].replace(/[-T:Z]/g, "").slice(0, 10) : null;
   const file = key && weather.meta.clouds.files[key];
   const source = map.getSource("clouds");
-  if (source && file) source.updateImage({ url: `data/weather/${file}`, coordinates: weather.meta.clouds.corners });
+  if (source && file) source.updateImage({ url: dataURL(`weather/${file}`), coordinates: weather.meta.clouds.corners });
   if (map.getLayer("clouds")) {
     map.setLayoutProperty("clouds", "visibility", $("#show-clouds").checked && file ? "visible" : "none");
   }
@@ -86,7 +87,7 @@ function updateWeather() {
 function addCloudLayer() {
   const files = Object.values(weather.meta.clouds.files);
   if (!files.length) return;
-  map.addSource("clouds", { type: "image", url: `data/weather/${files.at(-1)}`, coordinates: weather.meta.clouds.corners });
+  map.addSource("clouds", { type: "image", url: dataURL(`weather/${files.at(-1)}`), coordinates: weather.meta.clouds.corners });
   const c = colors();
   map.addLayer({
     id: "clouds", type: "raster", source: "clouds",

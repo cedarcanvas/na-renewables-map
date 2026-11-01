@@ -178,6 +178,33 @@ when that happens ("reusing its calibration from …"). MISO's first entry was
 seeded from a measured comparison on 2026-10-26 and is replaced automatically
 once EIA publishes hours the history covers.
 
+## Public copy
+
+The map is public at https://maps.ridgelinemaps.com/renewables/, a page in the
+Ridgeline Maps gallery (repo `cedarcanvas/brokenarrow`, folder
+`tools/maps_site/renewables/`). Its data changes hourly, so it isn't in the
+gallery repo: the page's `<meta name="data-url">` points at
+https://cedarcanvas.github.io/renewables-data/, the GitHub Pages site of
+`cedarcanvas/renewables-data`. After each successful run, `scripts/hourly.sh`
+calls `python -m pipeline.publish`, which copies `web/data` into its checkout at
+`data/publish/`, replaces that repo's only commit and force-pushes it, so
+neither repo's history grows by the hour.
+
+The public `generation.json` (`data/generation_public.json`) is built without
+PJM's Data Miner feed, whose terms allow internal use only, so there PJM stays on
+EIA-930. The page has no AdSense, unlike the gallery's other maps, because its
+weather comes from Open-Meteo's free non-commercial API.
+
+When the page's code changes, copy it into a gallery checkout and open a PR
+there:
+
+```bash
+.venv/bin/python -m pipeline.publish --site ~/path/to/brokenarrow
+```
+
+`python -m pipeline.publish --setup` created the data repo, its checkout and its
+Pages site (once, 2026-10-31).
+
 ## Pipeline
 
 - `pipeline/plants.py`: EIA-860M → `web/data/plants.geojson`, one point per plant and fuel
@@ -190,10 +217,11 @@ once EIA publishes hours the history covers.
 - `pipeline/generation.py`: EIA-930, plus calibrated live ISO hours after EIA ends → `data/ba_generation.csv`, the last 48 hours by region and fuel
 - `pipeline/weather.py`: Open-Meteo → `data/weather.csv`, hourly wind at ~100 m for each 0.1° cell with wind farms and sunshine for each 0.5° cell with solar farms (~2,700 locations, about 6 minutes). The free tier allows 10,000 calls a day, so it refreshes every 8 hours; `data/weather_calls.json` logs each day's calls, and a fetch that would go over is skipped (the last weather is reused). Plants added between refreshes get just their own cells fetched
 - `pipeline/curves.py`: turns local weather into each plant's expected capacity factor
-- `pipeline/allocate.py`: splits each region's hourly total among its plants, weighted by those capacity factors → `web/data/generation.json`
+- `pipeline/allocate.py`: splits each region's hourly total among its plants, weighted by those capacity factors → `web/data/generation.json` (and again without PJM's feed → `data/generation_public.json`)
 - `pipeline/gfs.py`: NOAA GFS → `web/data/weather/` (all hours' wind in one `wind.png`, a Web Mercator cloud PNG per hour, `meta.json`); GDAL reads and reprojects the GRIB files
 - `pipeline/backtest.py`: scores the split against Ontario's and Alberta's metered farms → `data/backtest/units.csv` (not part of the hourly run)
 - `pipeline/run.py`: runs them all; re-downloads plants when they're more than 30 days old (`--refresh-plants` to force)
+- `pipeline/publish.py`: pushes the public copy's data (see "Public copy"; run by `scripts/hourly.sh`, not `run.py`)
 
 Region codes that differ between the two EIA datasets are mapped in
 `BA_ALIASES` in `pipeline/common.py`.

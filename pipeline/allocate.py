@@ -135,9 +135,9 @@ def weather_grids(weather, hours):
     }
 
 
-def build(source="EIA-930", weather=None):
+def build(source="EIA-930", weather=None, totals_csv=BA_GENERATION_CSV, out=PLANT_GENERATION_JSON):
     plants, plants_source = load_plants()
-    gen = pd.read_csv(BA_GENERATION_CSV, parse_dates=["utc"])
+    gen = pd.read_csv(totals_csv, parse_dates=["utc"])
     if "source" not in gen:
         gen["source"] = "eia"
     hours = sorted(gen["utc"].unique())
@@ -238,7 +238,7 @@ def build(source="EIA-930", weather=None):
         "flows": aligned_flows(hours),
         "series": series,
         "weather": plant_weather,
-    }, PLANT_GENERATION_JSON)
+    }, out)
 
     # Where the two datasets don't line up, so gaps on the map can be explained.
     unplaced = {k: np.nanmax(v) for k, v in totals.items() if k not in matched and np.nanmax(v) > 1}
@@ -250,7 +250,7 @@ def build(source="EIA-930", weather=None):
     if unplaced:
         print("BA totals with no matching plants (peak MW):",
               {f"{ba}/{fuel}": round(v) for (ba, fuel), v in sorted(unplaced.items(), key=lambda kv: -kv[1])[:8]})
-    print(f"Wrote {PLANT_GENERATION_JSON}")
+    print(f"Wrote {out}")
 
 
 if __name__ == "__main__":

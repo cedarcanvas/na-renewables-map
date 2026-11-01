@@ -18,6 +18,9 @@ METERED_CSV = ROOT / "data" / "metered_generation.csv"   # per-plant readings (O
 FLOWS_CSV = ROOT / "data" / "flows.csv"                  # Hydro-Québec's flows to neighbours
 WEATHER_CSV = ROOT / "data" / "weather.csv"
 PLANT_GENERATION_JSON = WEB_DATA / "generation.json"
+# The same for the public copy (publish.py), without PJM's Data Miner feed (see live.py).
+PUBLIC_BA_GENERATION_CSV = ROOT / "data" / "ba_generation_public.csv"
+PUBLIC_GENERATION_JSON = ROOT / "data" / "generation_public.json"
 
 # How many hours of history the map's time slider covers.
 HOURS = 48

@@ -135,6 +135,9 @@ function applyThemeColors() {
   updateMapKey();
 }
 
+const DATA_URL = new URL(document.querySelector('meta[name="data-url"]')?.content ?? "data/", location.href);
+const dataURL = (path) => new URL(path, DATA_URL).href;
+
 async function loadJSON(url) {
   const r = await fetch(url, { cache: "no-cache" });
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
@@ -147,9 +150,9 @@ async function init() {
     setTheme(THEME_CHOICES[(THEME_CHOICES.indexOf(themeChoice) + 1) % THEME_CHOICES.length]));
   systemDark.addEventListener("change", () => themeChoice === "auto" && applyBasemap());
 
-  state.plants = await loadJSON("data/plants.geojson");
+  state.plants = await loadJSON(dataURL("plants.geojson"));
   try {
-    state.gen = await loadJSON("data/generation.json");
+    state.gen = await loadJSON(dataURL("generation.json"));
   } catch {
     state.gen = null;
   }
@@ -287,7 +290,7 @@ let hoveredRegion = null;
 async function addRegionLayers() {
   let regions;
   try {
-    regions = await loadJSON("data/regions.geojson");
+    regions = await loadJSON(dataURL("regions.geojson"));
   } catch {
     $("#show-regions").closest("label").hidden = true; // not built yet: python -m pipeline.regions
     return;

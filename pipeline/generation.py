@@ -19,8 +19,8 @@ import pandas as pd
 import requests
 
 from .common import (
-    BA_GENERATION_CSV, CALIBRATION_JSON, FLOWS_CSV, FUELS, HOURS, METERED_CSV, PLANTS_GEOJSON, RAW, USER_AGENT,
-    download, eia_api_key,
+    BA_GENERATION_CSV, CALIBRATION_JSON, FLOWS_CSV, FUELS, HOURS, METERED_CSV, PLANTS_GEOJSON,
+    PUBLIC_BA_GENERATION_CSV, RAW, USER_AGENT, download, eia_api_key,
 )
 
 API_URL = "https://api.eia.gov/v2/electricity/rto/fuel-type-data/data/"
@@ -297,6 +297,11 @@ def build():
     window = last_window(df)
     BA_GENERATION_CSV.parent.mkdir(parents=True, exist_ok=True)
     window.to_csv(BA_GENERATION_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
+    # The public copy can't use PJM's Data Miner feed (see live.py), so there PJM
+    # stays on EIA-930 and its hours after EIA's last show as not reported.
+    pjm = (df["source"] == "live") & (df["feed"] == "PJM") if "feed" in df else pd.Series(False, df.index)
+    public = last_window(df[~pjm]) if pjm.any() else window
+    public.to_csv(PUBLIC_BA_GENERATION_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
 
     hours = window["utc"].drop_duplicates()
     latest = window[window["utc"] == hours.max()]
