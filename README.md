@@ -233,3 +233,8 @@ Region codes that differ between the two EIA datasets are mapped in
   outage notices, pressure / temperature / solar radiation layers, forecast
   hours, satellite imagery, individual turbines
 - Hosting
+
+## Hourly runs on GitHub
+
+Since Nov 4, 2026 the hourly run happens on GitHub Actions (.github/workflows/hourly.yml), not on the iMac.
+History is kept on this repo's state branch; the public data is served at https://cedarcanvas.github.io/na-renewables-map/ .
