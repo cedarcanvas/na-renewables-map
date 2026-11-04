@@ -279,3 +279,8 @@ footer a { color: inherit; }
 .layers > .muted { margin-right: 10px; }
 #sym-note { flex-basis: 100%; margin: 2px 0 0; }
 #sym-note:empty { display: none; }
+
+/* Links back to the maps hub and ridgelinemaps.com */
+.rm-links { margin: 6px 0 0; font-size: 12.5px; opacity: .8; }
+.rm-links a { color: inherit; }
+.rm-links a:hover, .rm-links a:focus-visible { opacity: 1; text-decoration: underline; }
