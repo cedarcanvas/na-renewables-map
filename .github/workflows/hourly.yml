@@ -15,6 +15,12 @@ name: Hourly renewables data
 on:
   schedule:
     - cron: "10 * * * *"      # every hour at :10 (GitHub may start it a few minutes late)
+  push:                      # also run right after the pipeline code changes
+    branches: [main]
+    paths:
+      - "pipeline/**"
+      - "requirements.txt"
+      - ".github/workflows/hourly.yml"
   workflow_dispatch:
     inputs:
       refresh_plants:
