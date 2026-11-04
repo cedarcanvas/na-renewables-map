@@ -1,0 +1,129 @@
+# Hourly run of the North American Renewables Map pipeline, on GitHub instead of the iMac.
+#
+# Every hour this restores the pipeline's saved history (the `state` branch) and its
+# download cache, runs `python -m pipeline.run`, publishes the public data with GitHub
+# Pages (https://cedarcanvas.github.io/na-renewables-map/), then saves the history again.
+#
+# - The EIA key comes from the repo secret EIA_API_KEY (Settings -> Secrets -> Actions).
+#   No PJM key is used here, so the public data never includes PJM's Data Miner feed.
+# - If a run fails, nothing is deployed: the map keeps the previous hour's data, and
+#   GitHub emails you. Run it by hand from Actions -> "Hourly renewables data" -> Run workflow.
+# - Pages deploys from Actions don't add commits, so the repo doesn't grow by the hour.
+
+name: Hourly renewables data
+
+on:
+  schedule:
+    - cron: "10 * * * *"      # every hour at :10 (GitHub may start it a few minutes late)
+  workflow_dispatch:
+    inputs:
+      refresh_plants:
+        description: "Also re-download plants, regions and transmission lines"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write    # save the history to the state branch
+  pages: write
+  id-token: write
+  actions: write     # keep this scheduled workflow switched on (see the last step)
+
+concurrency:
+  group: hourly-renewables
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore saved history (state branch)
+        run: |
+          if git ls-remote --exit-code origin state >/dev/null; then
+            git fetch --depth 1 origin state
+            git archive FETCH_HEAD | tar -x -C .
+            echo "Restored: $(git log -1 --format=%s FETCH_HEAD)"
+          else
+            echo "::warning::No state branch yet; starting without history."
+          fi
+
+      - name: Restore download cache
+        uses: actions/cache/restore@v4
+        with:
+          path: data/raw
+          key: raw-${{ github.run_id }}
+          restore-keys: raw-
+
+      - name: Install GDAL
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends gdal-bin
+          gdalinfo --version
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Run the pipeline
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+        run: |
+          set +e
+          args=""
+          # Monthly refresh of plants, regions and lines (1st of the month, 08:xx UTC), or on request.
+          # (Needed because restored files carry the restore time, not their real age.)
+          if [ "${{ inputs.refresh_plants }}" = "true" ] || [ "$(date -u +%d%H)" = "0108" ]; then
+            args="--refresh-plants"
+          fi
+          python -m pipeline.run $args > run.log 2>&1
+          status=$?
+          grep -v -- " - INFO - " run.log
+          exit $status
+
+      - name: Assemble the public data
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import pipeline.publish as p
+          p.CHECKOUT = Path("_site")
+          p.CHECKOUT.mkdir(exist_ok=True)
+          p.sync()
+          (p.CHECKOUT / "README.md").write_text(p.README)
+          (p.CHECKOUT / ".nojekyll").write_text("")
+          PY
+          ls -la _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - uses: actions/deploy-pages@v4
+
+      - name: Save history (state branch)
+        if: success()
+        run: |
+          mkdir -p /tmp/state && cd /tmp/state && git init -q -b state
+          rsync -a --exclude raw --exclude publish --exclude backtest "$GITHUB_WORKSPACE/data" .
+          mkdir -p web && rsync -a "$GITHUB_WORKSPACE/web/data" web/
+          git -c user.name="Renewables map pipeline" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" add -A
+          git -c user.name="Renewables map pipeline" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Pipeline state after run ${{ github.run_id }}"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" state
+
+      - name: Save download cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/raw
+          key: raw-${{ github.run_id }}
+
+      - name: Keep this schedule switched on
+        # GitHub turns off scheduled workflows in repos with no new commits for 60 days.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/hourly.yml/enable" || true
