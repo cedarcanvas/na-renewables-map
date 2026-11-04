@@ -26,7 +26,7 @@ from pathlib import Path
 from .common import PUBLIC_GENERATION_JSON, ROOT, WEB_DATA
 
 DATA_REPO = "cedarcanvas/renewables-data"
-DATA_HOST = "https://cedarcanvas.github.io/renewables-data/"
+DATA_HOST = "https://cedarcanvas.github.io/na-renewables-map/"  # GitHub Actions build (was renewables-data)
 CHECKOUT = ROOT / "data" / "publish"
 # web/data files the page reads; generation.json comes from PUBLIC_GENERATION_JSON.
 FILES = ["plants.geojson", "regions.geojson", "transmission.pmtiles", "weather"]
