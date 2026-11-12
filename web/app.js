@@ -267,7 +267,7 @@ function flowLayers() {
       getSize: 12,
       getColor: colors().flowLabel,
       getPixelOffset: [0, -10],
-      fontFamily: "system-ui, -apple-system, sans-serif",
+      fontFamily: "'Libre Franklin', 'Helvetica Neue', Arial, sans-serif",
       fontWeight: 600,
       outlineWidth: 3,
       outlineColor: colors().flowHalo,
@@ -678,6 +678,7 @@ function buildHistory() {
     .map((f) => `<li style="--fuel:${f.color}"><span class="key"></span>${f.label}</li>`).join("");
 
   const t = historyTheme();
+  Chart.defaults.font.family = "'Libre Franklin', 'Helvetica Neue', Arial, sans-serif";
   historyChart = new Chart($("#history"), {
     type: "line",
     data: {
