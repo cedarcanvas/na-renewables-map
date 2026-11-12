@@ -19,7 +19,7 @@ import pandas as pd
 import requests
 
 from .common import (
-    BA_GENERATION_CSV, CALIBRATION_JSON, FLOWS_CSV, FUELS, HOURS, METERED_CSV, PLANTS_GEOJSON,
+    BA_GENERATION_CSV, CALIBRATION_JSON, EIA_HISTORY_CSV, FLOWS_CSV, FUELS, HOURS, METERED_CSV, PLANTS_GEOJSON,
     PUBLIC_BA_GENERATION_CSV, RAW, USER_AGENT, download, eia_api_key,
 )
 
@@ -278,6 +278,10 @@ def build():
     source = "EIA API v2" if key else "EIA-930 bulk CSV (no API key; refreshed daily)"
     eia = (from_api(key) if key else from_bulk()).assign(source="eia")
     df = eia
+    # EIA's whole fetch, before the window cut, so the nowcast has days of reports to fit on.
+    EIA_HISTORY_CSV.parent.mkdir(parents=True, exist_ok=True)
+    eia.dropna(subset=["mw"])[["utc", "ba", "fuel", "mw"]].to_csv(
+        EIA_HISTORY_CSV, index=False, date_format="%Y-%m-%dT%H:%M:%SZ")
     try:
         from . import live as live_feeds
 

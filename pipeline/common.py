@@ -20,6 +20,8 @@ WEATHER_CSV = ROOT / "data" / "weather.csv"
 PLANT_GENERATION_JSON = WEB_DATA / "generation.json"
 # The same for the public copy (publish.py), without PJM's Data Miner feed (see live.py).
 PUBLIC_BA_GENERATION_CSV = ROOT / "data" / "ba_generation_public.csv"
+# EIA-930 as fetched, before the window cut, for the nowcast (nowcast.py) to calibrate on.
+EIA_HISTORY_CSV = ROOT / "data" / "eia_history.csv"
 PUBLIC_GENERATION_JSON = ROOT / "data" / "generation_public.json"
 
 # How many hours of history the map's time slider covers.

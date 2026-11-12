@@ -12,6 +12,7 @@ const state = {
   hour: 0,
   visible: new Set(Object.keys(FUELS)),
   playing: null,
+  modelledHours: [],  // per hour: true where a tenth or more of the fleet is a weather-model estimate
   partialHours: [],   // per hour: true where the reporting fleet is under PARTIAL of capacity
   table: { sort: "mw", dir: "desc", country: "all", query: "" },
 };
@@ -365,14 +366,16 @@ function regionSummary(r) {
     .map(([fuel, f]) => {
       const mw = totals[fuel]?.[state.hour];
       const pct = mw != null && caps[fuel] ? ` (${fmt((100 * Math.max(mw, 0)) / caps[fuel])}%)` : "";
+      const modelled = mw != null && isModelled(r.code, fuel);
       return `<dt><span class="swatch" style="background:${f.color}"></span>${f.label}</dt>
-        <dd>${mw == null ? "no data" : `${fmt(Math.max(mw, 0))} MW${pct}`}</dd>`;
+        <dd>${mw == null ? "no data" : `${modelled ? "≈ " : ""}${fmt(Math.max(mw, 0))} MW${pct}${modelled ? " · modelled" : ""}`}</dd>`;
     })
     .join("");
   const live = g?.live?.[r.code];
   const hour = g?.hours[state.hour];
   const source = !g ? ""
     : live && hour >= live.from && hour <= live.until ? `${live.feed} live feed`
+    : Object.keys(totals).some((fuel) => totals[fuel][state.hour] != null && isModelled(r.code, fuel)) ? "EIA-930 plus weather model"
     : Object.values(totals).some((s) => s[state.hour] != null) ? "EIA-930"
     : "no data for this hour";
   return `<div class="region">
@@ -519,6 +522,12 @@ function coveredCap(fuel, caps, hour = state.hour) {
   return state.gen?.covered_cap?.[fuel]?.[hour] ?? caps[fuel];
 }
 
+// Is this region's fuel a weather-model estimate (nowcast.py) at this hour, not a report?
+function isModelled(ba, fuel, hour = state.hour) {
+  const from = state.gen?.modelled?.[ba]?.[fuel];
+  return !!from && state.gen.hours[hour] >= from;
+}
+
 // Share (%) of reporting capacity generating. Solar reads slightly negative at night
 // (inverters draw power), so it's floored at zero.
 function shareAt(fuel, caps, hour) {
@@ -585,6 +594,13 @@ function liveFeedsNow() {
   return { now: [...now].sort(), behind: [...behind].sort() };
 }
 
+function modelledRegions(hour) {
+  const out = new Set();
+  for (const [ba, fuels] of Object.entries(state.gen.modelled ?? {}))
+    if (Object.values(fuels).some((from) => hour >= from)) out.add(ba);
+  return out;
+}
+
 // Status chips: an icon and a label for each source, so state never rests on colour.
 function renderStatus(caps) {
   const ul = $("#feeds");
@@ -607,11 +623,19 @@ function renderStatus(caps) {
   const { now, behind } = liveFeedsNow();
   for (const f of now) chip(true, f, `${f}: live data for this hour`);
   for (const f of behind) chip(false, `${f} · behind`, `${f} hasn't reached this hour yet`);
+  if (modelledRegions(hour).size)
+    chip(false, "Weather model", `${modelledRegions(hour).size} regions whose EIA-930 reports haven't reached this hour are estimated from their recent output and the weather at their plants`);
 
   const partial = Object.entries(FUELS)
     .filter(([fuel]) => coveredCap(fuel, caps) < PARTIAL * caps[fuel])
     .map(([fuel, f]) => `${fmt((100 * coveredCap(fuel, caps)) / caps[fuel])}% of ${f.label.toLowerCase()}`);
-  $("#coverage").textContent = partial.length ? `Regions reporting this hour hold ${listFormat(partial)} capacity.` : "";
+  const modelled = Object.entries(FUELS)
+    .filter(([fuel]) => (state.gen.modelled_cap?.[fuel]?.[state.hour] ?? 0) >= 0.02 * caps[fuel])
+    .map(([fuel, f]) => `${fmt((100 * state.gen.modelled_cap[fuel][state.hour]) / caps[fuel])}% of ${f.label.toLowerCase()}`);
+  $("#coverage").textContent = [
+    partial.length ? `Regions reporting this hour hold ${listFormat(partial)} capacity.` : "",
+    modelled.length ? `Estimated from weather, not reported: ${listFormat(modelled)} capacity.` : "",
+  ].filter(Boolean).join(" ");
 }
 
 function renderPanel() {
@@ -645,6 +669,18 @@ const historyMarks = {
     state.partialHours.forEach((partial, i) => {
       if (partial) ctx.fillRect(x.getPixelForValue(i) - step / 2, area.top, step, area.bottom - area.top);
     });
+    // Weather-modelled hours: a dashed bar along the top, so they read apart from missing data.
+    ctx.strokeStyle = cssVar("--muted");
+    ctx.setLineDash([3, 3]);
+    ctx.lineWidth = 2;
+    state.modelledHours.forEach((modelled, i) => {
+      if (!modelled) return;
+      ctx.beginPath();
+      ctx.moveTo(x.getPixelForValue(i) - step / 2, area.top + 1);
+      ctx.lineTo(x.getPixelForValue(i) + step / 2, area.top + 1);
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
     const sx = x.getPixelForValue(state.hour);
     ctx.strokeStyle = cssVar("--text");
     ctx.lineWidth = 1;
@@ -673,6 +709,8 @@ function buildHistory() {
   const total = fuels.reduce((s, f) => s + caps[f], 0);
   state.partialHours = state.gen.hours.map((_, i) =>
     fuels.reduce((s, f) => s + coveredCap(f, caps, i), 0) < PARTIAL * total);
+  state.modelledHours = state.gen.hours.map((_, i) =>
+    fuels.reduce((s, f) => s + (state.gen.modelled_cap?.[f]?.[i] ?? 0), 0) >= 0.1 * total);
 
   $("#chart-legend").innerHTML = Object.values(FUELS)
     .map((f) => `<li style="--fuel:${f.color}"><span class="key"></span>${f.label}</li>`).join("");
@@ -789,7 +827,7 @@ function buildHistoryTable(caps) {
       return `<td class="num">${share == null ? "–" : `${fmt(share)}% · ${fmt(Math.max(mw, 0) / 1000, 1)}`}</td>`;
     }).join("");
     const when = hourLabel(iso, { weekday: "short", hour: "numeric" });
-    return `<tr><td>${when}${state.partialHours[i] ? " *" : ""}</td>${cells}</tr>`;
+    return `<tr><td>${when}${state.partialHours[i] ? " *" : ""}${state.modelledHours[i] ? " ≈" : ""}</td>${cells}</tr>`;
   }).reverse().join("");
   table.innerHTML = `${head}<tbody>${rows}</tbody>`;
 }
@@ -961,6 +999,8 @@ function popupNote(p, mw, weighted) {
       : "hourly reading for this plant";
     return `Metered: ${live?.feed ?? region}'s ${reading} (shared by capacity where one meter covers several plants).`;
   }
+  if (isModelled(p.ba, p.fuel))
+    return `Modelled: ${region}'s ${p.fuel} output hasn't been reported to EIA for this hour. This is its recent output scaled by the weather at the region's plants${weighted ? ", then shared by local " + (p.fuel === "wind" ? "wind" : "sunshine") : ""}.`;
   const fromLive = live && state.gen.hours[state.hour] >= live.from;
   const source = !fromLive ? `${region}'s ${p.fuel} total reported to EIA`
     : live.feed === "SaskPower" ? `SaskPower's latest published ${p.fuel} figure (a summary of the previous day)`

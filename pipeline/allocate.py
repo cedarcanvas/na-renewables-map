@@ -156,11 +156,19 @@ def build(source="EIA-930", weather=None, totals_csv=BA_GENERATION_CSV, out=PLAN
         arr[[hour_index[h] for h in g["utc"]]] = g["mw"].to_numpy()
         totals[(ba, fuel)] = arr
 
+    # (ba, fuel) -> mask of hours that are weather-model estimates (nowcast.py), not reports.
+    model_hours = {}
+    for (ba, fuel), g in gen[gen["source"] == "model"].groupby(["ba", "fuel"]):
+        mask = np.zeros(len(hours), dtype=bool)
+        mask[[hour_index[h] for h in g["utc"]]] = True
+        model_hours[(ba, fuel)] = mask
+
     series, plant_weather = {}, {}
     matched, unreported = set(), []
     # Capacity of plants whose BA reported each hour: in live-only hours the
     # regions EIA hasn't published yet drop out, and the map says so.
     covered = {fuel: np.zeros(len(hours)) for fuel in FUELS}
+    modelled_cap = {fuel: np.zeros(len(hours)) for fuel in FUELS}  # the part of `covered` that is modelled
     for (ba, fuel), group in plants.groupby(["ba", "fuel"]):
         ba_total = totals.get((ba, fuel))
         if ba_total is None:
@@ -196,6 +204,7 @@ def build(source="EIA-930", weather=None, totals_csv=BA_GENERATION_CSV, out=PLAN
                 unreported += group["id"][free].tolist()
                 free[:] = False
         covered[fuel] += caps[has_meter | free].sum() * reported
+        modelled_cap[fuel] += caps[has_meter | free].sum() * model_hours.get((ba, fuel), 0)
 
         est = np.full((len(hours), len(caps)), np.nan)
         for i, total in enumerate(ba_total):
@@ -220,6 +229,10 @@ def build(source="EIA-930", weather=None, totals_csv=BA_GENERATION_CSV, out=PLAN
         feed = g["feed"].dropna().iloc[0] if "feed" in g and g["feed"].notna().any() else feed_of.get(ba, ba)
         live[ba] = {"from": stamp(g["utc"].min()), "until": stamp(g["utc"].max()), "feed": feed}
     eia_until = gen.loc[gen["source"] == "eia", "utc"].max()
+    # Region -> fuel -> first hour that is a weather-model estimate, not a report.
+    modelled = {}
+    for (ba, fuel), mask in model_hours.items():
+        modelled.setdefault(ba, {})[fuel] = stamp(hours[int(mask.argmax())])
     write_json({
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generation_source": source,
@@ -228,10 +241,13 @@ def build(source="EIA-930", weather=None, totals_csv=BA_GENERATION_CSV, out=PLAN
         "hours": [stamp(h) for h in hours],
         "totals": fuel_totals,
         "covered_cap": {fuel: [round(v) for v in arr] for fuel, arr in covered.items()},
+        # How much of covered_cap in each hour is a weather-model estimate (nowcast.py).
+        "modelled_cap": {fuel: [round(v) for v in arr] for fuel, arr in modelled_cap.items()},
         # Each region's own reported totals, for the region popups.
         "ba_totals": ba_totals(totals),
         "eia_until": stamp(eia_until),
         "live": live,
+        "modelled": modelled,
         "metered": sorted(metered),
         # Plants in a reporting region that its grid operator's figures leave out.
         "unreported": sorted(unreported),

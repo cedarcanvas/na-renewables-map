@@ -40,9 +40,10 @@ WEATHER_FUELS = ("wind", "solar")
 # every WEATHER_MAX_AGE_HOURS (8) uses at most 3 × ~2,700 of the 10,000 daily calls.
 FORECAST_AHEAD = pd.Timedelta(hours=24)
 # Also cache this much before the EIA window, so a window that starts a few hours
-# earlier next run (EIA's lag varies) doesn't force a refetch. It costs nothing:
-# Open-Meteo counts locations, not days.
-LEAD_IN = pd.Timedelta(hours=24)
+# earlier next run (EIA's lag varies) doesn't force a refetch, and so the nowcast has
+# weather under the hours it calibrates on. It costs nothing: Open-Meteo counts
+# locations, not days.
+LEAD_IN = pd.Timedelta(hours=72)  # also the nowcast's calibration hours (nowcast.py)
 
 
 CALLS_JSON = WEATHER_CSV.parent / "weather_calls.json"

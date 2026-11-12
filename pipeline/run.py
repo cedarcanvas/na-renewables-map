@@ -8,7 +8,7 @@ totals -> weather -> plant estimates.
 import sys
 import time
 
-from . import allocate, generation, gfs, plants, regions, transmission, weather
+from . import allocate, generation, gfs, nowcast, plants, regions, transmission, weather
 from .common import PLANTS_GEOJSON, PUBLIC_BA_GENERATION_CSV, PUBLIC_GENERATION_JSON
 
 PLANTS_MAX_AGE_DAYS = 30
@@ -34,6 +34,7 @@ def main(argv):
     except Exception as e:  # Open-Meteo down or over quota
         print(f"Weather fetch failed ({e}); using cached weather where it covers these hours, else capacity only")
         wx = None
+    nowcast.build(wx)  # weather-model hours for regions whose EIA reports lag
     allocate.build(source, wx)
     # The public copy's estimates (publish.py), without PJM's live feed.
     allocate.build(source, wx, PUBLIC_BA_GENERATION_CSV, PUBLIC_GENERATION_JSON)
