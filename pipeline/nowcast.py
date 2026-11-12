@@ -134,7 +134,9 @@ def forecast(fuel, obs, targets, group, wide, cells, options=None):
             if pred is not None:
                 return pred, "yesterday's curve scaled by weather"
         pred, corr = weather_fit(obs, expected, targets, RESIDUAL_HOURS.get(fuel, 0.0), **(options or {}))
-        if pred is None or corr < MIN_CORRELATION:
+        if pred is None:
+            return None, "no weather for these hours"
+        if corr < MIN_CORRELATION:
             return None, f"weather tracks it poorly (r={corr:.2f})"
         return pred, f"weather fit r={corr:.2f}"
     if fuel == "hydro":

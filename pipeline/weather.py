@@ -84,7 +84,15 @@ def _record_calls(n):
 
 def _get(params, tries=4):
     for attempt in range(tries):
-        r = requests.get(API_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=120)
+        try:
+            r = requests.get(API_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=120)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            # One slow batch (seen from GitHub's runners) shouldn't throw away the whole fetch.
+            if attempt == tries - 1:
+                raise
+            print(f"  weather: {type(e).__name__}; retrying", flush=True)
+            time.sleep(15)
+            continue
         if r.status_code == 429 and attempt < tries - 1:
             time.sleep(60)  # minutely limit; the next minute starts fresh
             continue
