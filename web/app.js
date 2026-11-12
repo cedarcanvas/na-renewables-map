@@ -999,8 +999,16 @@ function popupNote(p, mw, weighted) {
       : "hourly reading for this plant";
     return `Metered: ${live?.feed ?? region}'s ${reading} (shared by capacity where one meter covers several plants).`;
   }
-  if (isModelled(p.ba, p.fuel))
-    return `Modelled: ${region}'s ${p.fuel} output hasn't been reported to EIA for this hour. This is its recent output scaled by the weather at the region's plants${weighted ? ", then split among its plants by local " + (p.fuel === "wind" ? "wind" : "sunshine") : ""}.`;
+  if (isModelled(p.ba, p.fuel)) {
+    const how = {
+      wind: "its recent output scaled by the wind at the region's farms",
+      solar: "yesterday's output curve scaled by how the sunshine and cloud have changed since",
+      hydro: "its output at the same time yesterday",
+      geothermal: "its recent output, held steady",
+    }[p.fuel];
+    const split = weighted ? `, then split among its plants by local ${p.fuel === "wind" ? "wind" : "sunshine"}` : "";
+    return `Modelled: ${region}'s ${p.fuel} output hasn't been reported to EIA for this hour. This is ${how}${split}.`;
+  }
   const fromLive = live && state.gen.hours[state.hour] >= live.from;
   const source = !fromLive ? `${region}'s ${p.fuel} total reported to EIA`
     : live.feed === "SaskPower" ? `SaskPower's latest published ${p.fuel} figure (a summary of the previous day)`
