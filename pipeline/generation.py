@@ -43,6 +43,22 @@ REPORTING_SHARE = 0.75
 
 # --- API path -------------------------------------------------------------
 
+def _get_page(params, offset, tries=4):
+    """One page of the API. A slow answer is retried: from GitHub's runners about one
+    run in four timed out on its first request, and without a retry that sank the run.
+    Errors are reported by type only, since requests' messages can carry the URL and
+    with it the key."""
+    for attempt in range(tries):
+        try:
+            return requests.get(API_URL, params={**params, "offset": offset},
+                                headers={"User-Agent": USER_AGENT}, timeout=60)
+        except (requests.Timeout, requests.ConnectionError) as e:
+            if attempt == tries - 1:
+                raise RuntimeError(f"EIA API: {type(e).__name__} after {tries} tries") from None
+            print(f"  EIA API: {type(e).__name__}; retrying", flush=True)
+            time.sleep(10 * (attempt + 1))
+
+
 def from_api(key, hours=HOURS):
     codes = {code: fuel for fuel, spec in FUELS.items() for code in spec["eia930_api"]}
     start = (pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=hours) - API_LAG_MARGIN).strftime("%Y-%m-%dT%H")
@@ -60,8 +76,7 @@ def from_api(key, hours=HOURS):
 
     rows, offset = [], 0
     while True:
-        r = requests.get(API_URL, params={**params, "offset": offset},
-                         headers={"User-Agent": USER_AGENT}, timeout=60)
+        r = _get_page(params, offset)
         if not r.ok:
             # requests' own error message includes the URL, and with it the key.
             raise RuntimeError(f"EIA API {r.status_code}: {r.text[:300].replace(key, '<key>')}")
