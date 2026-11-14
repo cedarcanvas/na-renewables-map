@@ -1,0 +1,119 @@
+{
+ "CAISO/geothermal": {
+  "factors": {
+   "CISO": 0.9991
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "CAISO/hydro": {
+  "factors": {
+   "CISO": 1.0004
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "CAISO/solar": {
+  "factors": {
+   "CISO": 0.8776
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "CAISO/wind": {
+  "factors": {
+   "CISO": 0.8171
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "ERCOT/hydro": {
+  "factors": {
+   "ERCO": 0.9994
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "ERCOT/solar": {
+  "factors": {
+   "ERCO": 1.001
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "ERCOT/wind": {
+  "factors": {
+   "ERCO": 0.9772
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "ISO-NE/hydro": {
+  "factors": {
+   "ISNE": 0.5045
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "ISO-NE/solar": {
+  "factors": {
+   "ISNE": 1.0001
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "ISO-NE/wind": {
+  "factors": {
+   "ISNE": 0.9933
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "NYISO/hydro": {
+  "factors": {
+   "NYIS": 0.9996
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "NYISO/wind": {
+  "factors": {
+   "NYIS": 1.0007
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "SPP/hydro": {
+  "factors": {
+   "SWPP": 0.5463,
+   "SWPW": 0.4573
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "SPP/solar": {
+  "factors": {
+   "SWPP": 0.8023,
+   "SWPW": 0.1885
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "SPP/wind": {
+  "factors": {
+   "SWPP": 0.9575,
+   "SWPW": 0.044
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "MISO/wind": {
+  "factors": {
+   "MISO": 0.9957
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "MISO/solar": {
+  "factors": {
+   "MISO": 1.0021
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "BPA/hydro": {
+  "factors": {
+   "BPAT": 1.0074
+  },
+  "at": "2026-11-14T21:11:11Z"
+ },
+ "BPA/wind": {
+  "factors": {
+   "BPAT": 0.9051
+  },
+  "at": "2026-11-14T21:11:11Z"
+ }
+}
