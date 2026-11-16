@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from .common import BA_GENERATION_CSV, RAW, USER_AGENT, WEB_DATA
+from .common import BA_GENERATION_CSV, HOURS, RAW, USER_AGENT, WEB_DATA
 
 # The 0.25° product is the one with hourly steps (0.5° is three-hourly).
 FILTER = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
@@ -40,7 +40,7 @@ WIND_RANGE = 40.0                     # m/s; 100 m winds beyond this are clipped
 CLOUD_WIDTH = 600                     # px of each reprojected cloud image
 OUT = WEB_DATA / "weather"
 CACHE = RAW / "gfs"
-KEEP = pd.Timedelta(days=4)
+KEEP = pd.Timedelta(hours=HOURS) + pd.Timedelta(days=2)  # the window ends up to a day behind now
 GDAL_ENV = {**os.environ, "GDAL_PAM_ENABLED": "NO"}
 
 

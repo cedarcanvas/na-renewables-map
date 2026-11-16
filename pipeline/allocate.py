@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from . import weather as wx
-from . import grids
+from . import grids as grid_groups
 from .common import (
     BA_GENERATION_CSV, FLOWS_CSV, FUELS, METERED_CSV, PLANT_GENERATION_JSON, PLANTS_GEOJSON, WEATHER_CSV, write_json,
 )
@@ -273,7 +273,7 @@ def build(source="EIA-930", weather=None, totals_csv=BA_GENERATION_CSV, out=PLAN
         "flows": aligned_flows(hours),
         # Hourly MW between regions on different grids, and the grid catalogue for the page.
         "ties": aligned_ties(hours),
-        "grids": grids.catalog(),
+        "grids": grid_groups.catalog(),
         "series": series,
         "weather": plant_weather,
     }, out)
