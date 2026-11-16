@@ -22,7 +22,12 @@ def main(argv):
     if stale(PLANTS_GEOJSON) or "--refresh-plants" in argv:
         plants.build()
     if stale(regions.REGIONS_GEOJSON) or "--refresh-plants" in argv:
-        regions.build()
+        try:
+            regions.build()
+        except Exception as e:  # GitHub's GDAL can't read HIFLD's Parquet: keep the saved regions
+            print(f"Regions not rebuilt ({type(e).__name__}: {e})")
+    if not regions.GRIDS_GEOJSON.exists():
+        regions.retag()  # older saved regions: add grid tags and write grids.geojson
     if stale(transmission.TRANSMISSION_PMTILES) or "--refresh-plants" in argv:
         try:
             transmission.build(refresh=True)  # re-fetch OpenStreetMap's Canadian lines too
