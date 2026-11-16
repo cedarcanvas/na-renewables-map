@@ -24,6 +24,8 @@ from .common import (
 )
 
 API_URL = "https://api.eia.gov/v2/electricity/rto/fuel-type-data/data/"
+# Gateway and rate-limit errors, worth another try.
+RETRY_STATUS = {429, 500, 502, 503, 504}
 BULK_URL = "https://www.eia.gov/electricity/gridmonitor/sixMonthFiles/{name}"
 
 # The API also returns EIA's regional and national roll-ups as respondents;
@@ -43,20 +45,24 @@ REPORTING_SHARE = 0.75
 
 # --- API path -------------------------------------------------------------
 
-def _get_page(params, offset, tries=4):
-    """One page of the API. A slow answer is retried: from GitHub's runners about one
-    run in four timed out on its first request, and without a retry that sank the run.
-    Errors are reported by type only, since requests' messages can carry the URL and
-    with it the key."""
+def _get_page(params, offset, tries=5):
+    """One page of the API, retried when EIA is slow or errors. From GitHub's runners the
+    first request often timed out or came back as an HTML 504 page, which sank about
+    1 run in 5. Errors are reported by type or status only, since requests' messages can
+    carry the URL and with it the key."""
     for attempt in range(tries):
         try:
-            return requests.get(API_URL, params={**params, "offset": offset},
-                                headers={"User-Agent": USER_AGENT}, timeout=60)
+            r = requests.get(API_URL, params={**params, "offset": offset},
+                             headers={"User-Agent": USER_AGENT}, timeout=60)
+            if r.status_code not in RETRY_STATUS or attempt == tries - 1:
+                return r  # the caller reports a final error status
+            problem = f"HTTP {r.status_code}"
         except (requests.Timeout, requests.ConnectionError) as e:
             if attempt == tries - 1:
                 raise RuntimeError(f"EIA API: {type(e).__name__} after {tries} tries") from None
-            print(f"  EIA API: {type(e).__name__}; retrying", flush=True)
-            time.sleep(10 * (attempt + 1))
+            problem = type(e).__name__
+        print(f"  EIA API: {problem}; retrying", flush=True)
+        time.sleep(15 * (attempt + 1))
 
 
 def from_api(key, hours=HOURS):

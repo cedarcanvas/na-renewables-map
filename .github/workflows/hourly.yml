@@ -108,7 +108,18 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
-      - uses: actions/deploy-pages@v4
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+        # About 1 run in 20 reports "No artifacts named github-pages were found" right
+        # after the upload finalized it; the next step tries once more.
+        continue-on-error: true
+      - name: Wait before deploying again
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 45
+      - name: Deploy to GitHub Pages (second try)
+        if: steps.deploy.outcome == 'failure'
+        uses: actions/deploy-pages@v4
 
       - name: Save history (state branch)
         if: success()
