@@ -85,9 +85,10 @@ def _record_calls(n):
 def _get(params, tries=4):
     for attempt in range(tries):
         try:
-            r = requests.get(API_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=120)
+            r = requests.get(API_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=45)
         except (requests.Timeout, requests.ConnectionError) as e:
-            # One slow batch (seen from GitHub's runners) shouldn't throw away the whole fetch.
+            # One slow batch (seen from GitHub's runners) shouldn't throw away the whole fetch. A batch
+            # normally answers in about 10 s; stalls never answered, and 120 s waits added up to 30 min.
             if attempt == tries - 1:
                 raise
             print(f"  weather: {type(e).__name__}; retrying", flush=True)
