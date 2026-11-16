@@ -45,14 +45,14 @@ REPORTING_SHARE = 0.75
 
 # --- API path -------------------------------------------------------------
 
-def _get_page(params, offset, tries=5):
+def _get_page(params, offset, tries=5, url=API_URL):
     """One page of the API, retried when EIA is slow or errors. From GitHub's runners the
     first request often timed out or came back as an HTML 504 page, which sank about
     1 run in 5. Errors are reported by type or status only, since requests' messages can
     carry the URL and with it the key."""
     for attempt in range(tries):
         try:
-            r = requests.get(API_URL, params={**params, "offset": offset},
+            r = requests.get(url, params={**params, "offset": offset},
                              headers={"User-Agent": USER_AGENT}, timeout=60)
             if r.status_code not in RETRY_STATUS or attempt == tries - 1:
                 return r  # the caller reports a final error status
@@ -314,6 +314,12 @@ def build():
             source += " + live grid-operator feeds"
     except Exception as e:  # gridstatus missing or an ISO site down: the map still works on EIA alone
         print(f"Live grid-operator feeds unavailable ({type(e).__name__}: {e}); using EIA only")
+    try:
+        from . import interchange
+
+        interchange.build()
+    except Exception as e:  # ties are context: a failure leaves last run's file, or none
+        print(f"  Grid ties unavailable ({type(e).__name__})")
     canada = canada_rows()
     if len(canada):
         df = pd.concat([df, canada], ignore_index=True)

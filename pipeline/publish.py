@@ -29,10 +29,10 @@ DATA_REPO = "cedarcanvas/renewables-data"
 DATA_HOST = "https://cedarcanvas.github.io/na-renewables-map/"  # GitHub Actions build (was renewables-data)
 CHECKOUT = ROOT / "data" / "publish"
 # web/data files the page reads; generation.json comes from PUBLIC_GENERATION_JSON.
-FILES = ["plants.geojson", "regions.geojson", "transmission.pmtiles", "weather"]
+FILES = ["plants.geojson", "regions.geojson", "grids.geojson", "transmission.pmtiles", "weather"]
 
 PAGE_DIR = "tools/maps_site/renewables"
-PAGE_FILES = ["index.html", "style.css", "app.js", "weather.js", "sun.js", "transmission.js"]
+PAGE_FILES = ["index.html", "style.css", "app.js", "weather.js", "sun.js", "transmission.js", "grids.js"]
 PAGE_URL = "https://maps.ridgelinemaps.com/renewables/"
 TITLE = "North American Renewables Map · Ridgeline Maps"
 DESCRIPTION = ("Live map of wind, solar, hydro and geothermal power across the US and Canada: about 11,500 plants, "

@@ -8,7 +8,7 @@ Québec).
 
 Output: web/data/transmission.pmtiles, one vector layer "lines" with properties
 kv (highest voltage in kV, -1 if unknown), cls (voltage class 0–4, -1 if unknown),
-dc (1 for direct current), owner, name, ends (substations at each end, US only) and
+dc (1 for direct current), grid (which interconnection, grids.py), owner, name, ends (substations at each end, US only) and
 country. Lower classes only enter the tiles from higher zooms (CLASSES), so the
 continental tiles carry just the backbone.
 """
@@ -143,7 +143,42 @@ def canada_lines(refresh=False):
             }
 
 
+def grid_tagger():
+    """Function(feature) -> grid key, from where the middle of the line falls among the regions'
+    outlines (merged by grid). A line in a gap between outlines takes the nearest grid within
+    NEAR degrees; further out (the territories, northern Alaska) it is "other"."""
+    from shapely import prepared
+    from shapely.geometry import shape
+    from shapely.ops import unary_union
+
+    from .grids import grid_of
+
+    by_grid = {}
+    for f in json.loads((WEB_DATA / "regions.geojson").read_text())["features"]:
+        if f["geometry"]["type"] != "Point":
+            by_grid.setdefault(grid_of(f["properties"]["code"]), []).append(shape(f["geometry"]))
+    merged = {g: unary_union(parts) for g, parts in by_grid.items() if g != "other"}
+    fast = {g: prepared.prep(geom) for g, geom in merged.items()}
+
+    def tag(feat):
+        line = shape(feat["geometry"])
+        if line.is_empty:
+            return "other"
+        mid = line.interpolate(0.5, normalized=True) if line.geom_type == "LineString" else line.representative_point()
+        hits = [g for g, geom in fast.items() if geom.contains(mid)]
+        if len(hits) == 1:
+            return hits[0]
+        near = sorted((merged[g].distance(mid), g) for g in (hits or merged))
+        return near[0][1] if near and (hits or near[0][0] <= NEAR) else "other"
+
+    return tag
+
+
+NEAR = 0.6  # degrees, ~60 km
+
+
 def build(refresh=False):
+    tag = grid_tagger()
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         # One file (and source layer) per class: c0–c4, and cu for unknown voltage.
@@ -152,6 +187,7 @@ def build(refresh=False):
         counts = {}
         for feat in itertools.chain(us_lines(), canada_lines(refresh)):
             p = feat["properties"]
+            p["grid"] = tag(feat)
             files[p["cls"]].write(json.dumps(feat, separators=(",", ":")) + "\n")
             counts[(p["country"], p["cls"])] = counts.get((p["country"], p["cls"]), 0) + 1
         for f in files.values():

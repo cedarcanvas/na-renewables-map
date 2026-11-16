@@ -88,7 +88,7 @@ function showLinePopup(p, lngLat) {
 }
 
 function applyLineTheme() {
-  if (map.getLayer("lines")) map.setPaintProperty("lines", "line-color", lineColor());
+  if (map.getLayer("lines")) map.setPaintProperty("lines", "line-color", typeof gridModeOn === "function" && gridModeOn() ? gridLineColor() : lineColor());
 }
 
 // The key: a dotted sample per class, biggest dots first, then unknown voltage.

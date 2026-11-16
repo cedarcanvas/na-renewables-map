@@ -15,6 +15,7 @@ BA_GENERATION_CSV = ROOT / "data" / "ba_generation.csv"
 LIVE_GENERATION_CSV = ROOT / "data" / "live_generation.csv"
 CALIBRATION_JSON = ROOT / "data" / "calibration.json"
 METERED_CSV = ROOT / "data" / "metered_generation.csv"   # per-plant readings (Ontario)
+TIES_CSV = ROOT / "data" / "ties.csv"                    # EIA-930 interchange between grids
 FLOWS_CSV = ROOT / "data" / "flows.csv"                  # Hydro-Québec's flows to neighbours
 WEATHER_CSV = ROOT / "data" / "weather.csv"
 PLANT_GENERATION_JSON = WEB_DATA / "generation.json"
@@ -25,7 +26,7 @@ EIA_HISTORY_CSV = ROOT / "data" / "eia_history.csv"
 PUBLIC_GENERATION_JSON = ROOT / "data" / "generation_public.json"
 
 # How many hours of history the map's time slider covers.
-HOURS = 48
+HOURS = 168  # 7 days
 
 # Weather is fetched once per grid cell, not per plant. Open-Meteo's free tier
 # counts every location as a call (600/minute, 10,000/day). Wind gets 0.1° cells,

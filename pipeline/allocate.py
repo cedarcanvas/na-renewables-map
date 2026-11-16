@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from . import weather as wx
+from . import grids
 from .common import (
     BA_GENERATION_CSV, FLOWS_CSV, FUELS, METERED_CSV, PLANT_GENERATION_JSON, PLANTS_GEOJSON, WEATHER_CSV, write_json,
 )
@@ -107,6 +108,24 @@ def aligned_flows(hours):
         series = g.groupby("utc")["mw"].mean().reindex(pd.DatetimeIndex(hours))
         start, end = link.split("→")
         out.append({"from": start, "to": end, "source": source, "mw": [compact(v) for v in series.to_numpy()]})
+    return out
+
+
+def aligned_ties(hours):
+    """[{a, b, at: [lon, lat], mw: [MW from a to b per hour, or null]}] for the links between grids."""
+    from .common import TIES_CSV
+    from .interchange import tie_points
+
+    if not TIES_CSV.exists():
+        return []
+    t = pd.read_csv(TIES_CSV, parse_dates=["utc"])
+    points = tie_points(t[["a", "b"]].drop_duplicates().itertuples(index=False, name=None))
+    out = []
+    for (a, b), g in t.groupby(["a", "b"]):
+        if (a, b) not in points:
+            continue
+        series = g.groupby("utc")["mw"].mean().reindex(pd.DatetimeIndex(hours))
+        out.append({"a": a, "b": b, "at": points[(a, b)], "mw": [compact(v) for v in series.to_numpy()]})
     return out
 
 
@@ -252,6 +271,9 @@ def build(source="EIA-930", weather=None, totals_csv=BA_GENERATION_CSV, out=PLAN
         # Plants in a reporting region that its grid operator's figures leave out.
         "unreported": sorted(unreported),
         "flows": aligned_flows(hours),
+        # Hourly MW between regions on different grids, and the grid catalogue for the page.
+        "ties": aligned_ties(hours),
+        "grids": grids.catalog(),
         "series": series,
         "weather": plant_weather,
     }, out)

@@ -190,6 +190,7 @@ async function init() {
   await addRegionLayers(); // first, so the lines and plant circles draw on top
   await addTransmissionLayers();
   addPlantLayers();
+  await addGridLayers();
   updateMapKey();
   addFlowOverlay();
   addSunArcs();
@@ -228,17 +229,18 @@ function addFlowOverlay() {
     // MapLibre 5.24's map; its own canvas on top works and the arcs sit above everything.
     interleaved: false,
     layers: flowLayers(),
-    getTooltip: ({ object }) => object && {
+    getTooltip: ({ object }) => object && (object.tie ? tieTooltip(object) : {
       text: `${object.start} → ${object.end}: ${fmt(Math.abs(object.mw))} MW\n` +
         `${FLOW_NOTES[object.source] ?? `From ${object.source}.`}\nEndpoints are approximate.`,
-    },
+    }),
   });
   map.addControl(flowOverlay);
   $("#show-flows").addEventListener("change", updateFlows);
 }
 
 function flowLayers() {
-  if (!$("#show-flows").checked) return [];
+  const ties = typeof tieLayers === "function" ? tieLayers() : [];
+  if (!$("#show-flows").checked) return ties;
   // Each arc runs the way the power flows, whichever way the source reports the link.
   const flows = (state.gen.flows ?? [])
     .map((f) => ({ ...f, mw: f.mw[state.hour] }))
@@ -276,6 +278,7 @@ function flowLayers() {
       characterSet: "auto", // the default is ASCII only, which drops accented letters
       updateTriggers: { getText: state.hour, getPosition: state.hour },
     }),
+    ...ties,
   ];
 }
 
@@ -484,7 +487,8 @@ function setHour(i) {
 }
 
 // Each played hour lasts this long; the wind particles blend between hours over it.
-const PLAY_STEP_MS = 400;
+// A week plays in about 25 s; the old 48 hours took 20.
+const PLAY_STEP_MS = 150;
 
 function play() {
   $("#play").textContent = "❚❚";
@@ -653,7 +657,7 @@ function renderPanel() {
   renderTop();
 }
 
-// --- 48-hour chart: share of reporting capacity, one line per fuel ------------------
+// --- History chart (the whole window): share of reporting capacity, one line per fuel ------------------
 
 let historyChart = null;
 

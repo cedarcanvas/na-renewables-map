@@ -51,6 +51,15 @@
       <label hidden><input type="checkbox" id="show-sun"> Sun arcs</label>
     </section>
 
+    <section id="grid-panel" class="layers small" aria-label="Separate grids">
+      <label><input type="checkbox" id="show-grids"> Separate grids</label>
+      <div id="grid-body" hidden>
+        <div id="grid-groups"></div>
+        <p id="grid-note" class="muted note"></p>
+        <button type="button" id="grid-clear" class="link-button" hidden>Clear picks</button>
+      </div>
+    </section>
+
     <section class="layers small" aria-label="Plant symbols">
       <span class="muted">Plant symbols:</span>
       <label><input type="checkbox" id="sym-normalized"> Normalized</label>
@@ -70,9 +79,9 @@
         <ul id="chart-legend" class="legend" aria-hidden="true"></ul>
       </div>
       <div class="chart-box">
-        <canvas id="history" role="img" aria-label="Line chart: share of reporting capacity generating, by fuel, over the last 48 hours"></canvas>
+        <canvas id="history" role="img" aria-label="Line chart: share of reporting capacity generating, by fuel, over the last 7 days"></canvas>
       </div>
-      <p class="muted small note">Last 48 hours. Shaded hours have only part of the fleet reporting. Click or drag to change the hour.</p>
+      <p class="muted small note">Last 7 days. Shaded hours have only part of the fleet reporting. Click or drag to change the hour.</p>
       <details class="table-view">
         <summary>Hourly values as a table</summary>
         <div class="scroll"><table id="history-table" class="data-table"></table></div>
@@ -142,6 +151,7 @@
   <script src="weather.js"></script>
   <script src="sun.js"></script>
   <script src="transmission.js"></script>
+  <script src="grids.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -240,7 +240,7 @@ class WindParticles {
 
 // --- Wind roses ---------------------------------------------------------------------
 // For a region's wind farms: how often the 100 m wind blew from each of 16 directions
-// over the slider's 48 hours, each petal stacked by speed class, with a needle for the
+// over the slider's hours, each petal stacked by speed class, with a needle for the
 // selected hour. Petals point where the wind came FROM (the meteorological way).
 
 const ROSE_SECTORS = 16;
@@ -364,7 +364,7 @@ function roseKeyHtml() {
   return `${keySample(drawRose(KEY_ROSE, 170, KEY_SIZE))}
     <div class="key-head">
       <h3>Wind roses</h3>
-      <p>Where the wind at 100 m came from over these 48 hours, and how hard it blew.</p>
+      <p>Where the wind at 100 m came from over the last 7 days, and how hard it blew.</p>
     </div>
     <ul class="key-list">
       <li>Petals point where the wind blew <em>from</em>; longer petals mean more of the hours.</li>

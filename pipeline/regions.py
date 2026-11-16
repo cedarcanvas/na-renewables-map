@@ -7,11 +7,13 @@ Canada: Natural Earth provinces, since each province is its own grid operator's
 area (Ontario is IESO, Québec is Hydro-Québec, and so on).
 
 Output: web/data/regions.geojson with a polygon and a label point per region,
-properties code, name, short, country.
+properties code, name, short, country, grid (synchronous interconnection) and
+operator (sub-group of a grid), both from grids.py.
 """
 
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -19,8 +21,10 @@ from shapely.geometry import MultiPolygon, Polygon, mapping, shape
 from shapely.ops import unary_union
 
 from .common import BA_ALIASES, RAW, WEB_DATA, download
+from .grids import grid_of, operator_of
 
 REGIONS_GEOJSON = WEB_DATA / "regions.geojson"
+GRIDS_GEOJSON = WEB_DATA / "grids.geojson"
 HIFLD_URL = ("https://data.source.coop/seerai/hifld/control-areas/control-areas/control-areas.parquet/"
              "part-00000-tid-1366803119161179266-3b93870a-5d6f-46f5-a28f-bb86485e7f9b-223-1-c000.zstd.parquet")
 PROVINCES_URL = "https://naciscdn.org/naturalearth/10m/cultural/ne_10m_admin_1_states_provinces_lakes.zip"
@@ -132,7 +136,8 @@ def build():
     features = []
     for code, parts in sorted(shapes.items()):
         geom = _generalize(unary_union([g.buffer(0) for g in parts]))
-        props = {"code": code, "name": names[code], "short": SHORT.get(code, code), "country": country[code]}
+        props = {"code": code, "name": names[code], "short": SHORT.get(code, code), "country": country[code],
+                 "grid": grid_of(code), "operator": operator_of(code)}
         features.append({"type": "Feature", "geometry": mapping(geom), "properties": props})
         # Inside the shape, unlike a centroid, which can fall outside an odd outline.
         point = geom.representative_point()
@@ -141,9 +146,40 @@ def build():
     REGIONS_GEOJSON.parent.mkdir(parents=True, exist_ok=True)
     REGIONS_GEOJSON.write_text(json.dumps({"type": "FeatureCollection", "features": features},
                                           separators=(",", ":")))
+    write_grids(features)
     print(f"Wrote {len(features) // 2} grid regions to {REGIONS_GEOJSON} "
           f"({REGIONS_GEOJSON.stat().st_size / 1e6:.1f} MB)")
 
 
+def write_grids(features):
+    """web/data/grids.geojson: each grid's outline, the regions' shapes merged, for the grid
+    view. Gaps and slivers between the regions' rough outlines are closed first."""
+    by_grid = {}
+    for f in features:
+        if f["geometry"]["type"] != "Point":
+            by_grid.setdefault(f["properties"]["grid"], []).append(shape(f["geometry"]).buffer(0))
+    out = []
+    for grid, parts in sorted(by_grid.items()):
+        if grid == "other":
+            continue
+        geom = unary_union(parts).buffer(0.08, join_style="round").buffer(-0.08, join_style="round")
+        out.append({"type": "Feature", "geometry": mapping(geom.simplify(0.02, preserve_topology=True)),
+                    "properties": {"grid": grid}})
+    GRIDS_GEOJSON.write_text(json.dumps({"type": "FeatureCollection", "features": out}, separators=(",", ":")))
+    print(f"Wrote {len(out)} grid outlines to {GRIDS_GEOJSON} ({GRIDS_GEOJSON.stat().st_size / 1e3:.0f} KB)")
+
+
+def retag():
+    """Add grid and operator to an existing regions.geojson without rebuilding the shapes."""
+    data = json.loads(REGIONS_GEOJSON.read_text())
+    for f in data["features"]:
+        code = f["properties"]["code"]
+        f["properties"].update(grid=grid_of(code), operator=operator_of(code))
+    REGIONS_GEOJSON.write_text(json.dumps(data, separators=(",", ":")))
+    write_grids(data["features"])
+    other = sorted({f["properties"]["code"] for f in data["features"] if f["properties"]["grid"] == "other"})
+    print(f"Tagged regions with grid and operator; unassigned: {other or 'none'}")
+
+
 if __name__ == "__main__":
-    build()
+    retag() if "--retag" in sys.argv[1:] else build()

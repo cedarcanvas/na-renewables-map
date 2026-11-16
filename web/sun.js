@@ -131,7 +131,7 @@ function sunArcSvg(site, size) {
 // An SVG string: the sun's path at a point over the given hours, each hour shaded by its
 // share of a clear sky's sunshine (null: no figure), with a needle at hour `now`.
 function drawSunArc(lng, lat, ends, share, now, size) {
-  const runs = daylightRuns(lng, lat, ends).slice(-3); // a 48-hour window touches at most 3 days
+  const runs = daylightRuns(lng, lat, ends).slice(-3); // the last three days: more rings would crowd the arc
   if (!runs.length || share.every((v) => v == null)) return "";
   const ramp = SUN_RAMPS[resolvedTheme()];
   const grid = cssVar("--line"), ink = cssVar("--text"), surface = cssVar("--bg");
@@ -219,7 +219,7 @@ function addSunArcs() {
 }
 
 // --- Popup chart --------------------------------------------------------------------
-// A solar farm's 48 hours: the sunshine at its weather cell (filled) against a clear
+// A solar farm's week: the sunshine at its weather cell (filled) against a clear
 // sky's (dashed), with the selected hour marked. Hover for any hour's figures.
 
 const SUN_CHART = { width: 236, height: 92, top: 6, axis: 14 };
@@ -237,7 +237,7 @@ function sunChartHtml(f) {
   const solar = FUELS.solar.color, grid = cssVar("--line"), muted = cssVar("--muted"), ink = cssVar("--text");
 
   let svg = `<svg class="sun-chart-plot" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img"
-    aria-label="Sunshine and clear-sky sunshine over the last 48 hours">`;
+    aria-label="Sunshine and clear-sky sunshine over the last 7 days">`;
   // Local midnights, with the weekday centred on the day's hours.
   const days = [];
   state.gen.hours.forEach((iso, i) => {
