@@ -294,10 +294,35 @@ def canada_rows():
     return pd.concat(rows, ignore_index=True).assign(source="live") if rows else pd.DataFrame()
 
 
+def eia_fallback():
+    """EIA-930 without the API: the bulk CSV (about a day behind), topped up with the hours
+    the last successful run saved. On Thanksgiving 2026 the API's data routes answered every
+    request with a 504 for over 11 hours, and with no fallback the map stopped updating."""
+    parts = []
+    try:
+        parts.append(from_bulk())
+    except Exception as e:
+        print(f"  EIA bulk CSV unavailable too ({type(e).__name__})")
+    if EIA_HISTORY_CSV.exists():
+        parts.append(pd.read_csv(EIA_HISTORY_CSV, parse_dates=["utc"]))  # newer: wins below
+    if not parts:
+        raise RuntimeError("EIA-930 unavailable: API, bulk CSV and saved history all failed")
+    df = pd.concat(parts, ignore_index=True).dropna(subset=["mw"])
+    since = pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=HOURS) - API_LAG_MARGIN
+    df = df[df["utc"] >= since].drop_duplicates(["utc", "ba", "fuel"], keep="last")
+    return df.reset_index(drop=True)
+
+
 def build():
     key = eia_api_key()
     source = "EIA API v2" if key else "EIA-930 bulk CSV (no API key; refreshed daily)"
-    eia = (from_api(key) if key else from_bulk()).assign(source="eia")
+    api_ok = bool(key)
+    try:
+        eia = from_api(key) if key else from_bulk()
+    except RuntimeError as e:  # the API down or erroring after its retries
+        print(f"EIA API failed ({e}); using the bulk CSV and last run's saved hours")
+        eia, source, api_ok = eia_fallback(), "EIA-930 bulk CSV + saved hours (API down)", False
+    eia = eia.assign(source="eia")
     df = eia
     # EIA's whole fetch, before the window cut, so the nowcast has days of reports to fit on.
     EIA_HISTORY_CSV.parent.mkdir(parents=True, exist_ok=True)
@@ -317,7 +342,8 @@ def build():
     try:
         from . import interchange
 
-        interchange.build()
+        if api_ok:  # same API: when it's down, keep last run's ties rather than wait out more timeouts
+            interchange.build()
     except Exception as e:  # ties are context: a failure leaves last run's file, or none
         print(f"  Grid ties unavailable ({type(e).__name__})")
     canada = canada_rows()
