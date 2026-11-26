@@ -25,7 +25,9 @@ const fmt = (n, digits = 0) => n.toLocaleString("en-US", { maximumFractionDigits
 // "normalized" draws every capacity ring the size of a 100 MW plant's and fills it by the
 // plant's share of capacity. Both match the default size at 100 MW.
 const symbols = { normalized: false, exponential: false };
-const RADIUS_PER_ROOT_MW = { 3: 0.22, 7: 0.9, 11: 4 };
+// Below zoom 3 circles shrink as fast as the map (half the radius per zoom level), so a
+// phone's starting view (about zoom 1.9) is no more crowded than a desktop's (about 3.3).
+const RADIUS_PER_ROOT_MW = { 1: 0.055, 3: 0.22, 7: 0.9, 11: 4 };
 const NORMAL_MW = 100;
 const radius = (mw) => {
   const p = symbols.exponential ? 0.75 : 0.5;
