@@ -196,6 +196,7 @@ async function init() {
 
   buildKpis();
   setupTable();
+  watchTable();
   buildHistory();
   renderPanel();
   renderSources();
@@ -517,6 +518,7 @@ function play() {
 function stop() {
   clearInterval(state.playing);
   state.playing = null;
+  if (tableStale) refreshTop();
   $("#play").textContent = "▶";
   updateWeather();
 }
@@ -668,7 +670,24 @@ function renderPanel() {
     $("#time-utc").textContent = `Hour ending ${iso.replace("T", " ").replace(":00Z", " UTC")}`;
   }
   historyChart?.draw(); // moves the selected-hour marker
+  // The plant table is most of each hour's work (about 10 of 13 ms). While playing, it
+  // waits until it's on screen, as it mostly isn't on a phone, where it sits below the map.
+  if (state.playing && !tableInView) tableStale = true;
+  else refreshTop();
+}
+
+let tableInView = true;
+let tableStale = false;
+function refreshTop() {
+  tableStale = false;
   renderTop();
+}
+function watchTable() {
+  if (typeof IntersectionObserver === "undefined") return;
+  new IntersectionObserver(([entry]) => {
+    tableInView = entry.isIntersecting;
+    if (tableInView && tableStale) refreshTop();
+  }).observe($("#top"));
 }
 
 // --- History chart (the whole window): share of reporting capacity, one line per fuel ------------------
