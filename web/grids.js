@@ -54,7 +54,7 @@ async function addGridLayers() {
   }
   let outlines, regions;
   try {
-    [outlines, regions] = await Promise.all([loadJSON(dataURL("grids.geojson")), loadJSON(dataURL("regions.geojson"))]);
+    [outlines, regions] = await Promise.all([loadData("grids.geojson"), loadData("regions.geojson")]);
   } catch {
     $("#grid-panel").hidden = true;
     return;

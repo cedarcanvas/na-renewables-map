@@ -17,9 +17,16 @@ const lineColor = () => LINE_COLORS[resolvedTheme()];
 const lineWidth = () => ["interpolate", ["linear"], ["zoom"],
   ...Object.entries(LINE_WIDTHS).flatMap(([z, widths]) => [Number(z), byClass(widths)])];
 
+// Whether the tiles have been built; asked once, at page open (init).
+let tilesCheck = null;
+function transmissionAvailable() {
+  tilesCheck ??= fetch(dataURL("transmission.pmtiles"), { method: "HEAD" }).then((r) => r.ok, () => false);
+  return tilesCheck;
+}
+
 async function addTransmissionLayers() {
   const url = dataURL("transmission.pmtiles");
-  if (typeof pmtiles === "undefined" || !(await fetch(url, { method: "HEAD" }).then((r) => r.ok, () => false))) {
+  if (typeof pmtiles === "undefined" || !(await transmissionAvailable())) {
     $("#show-lines").closest("label").hidden = true; // not built yet: python -m pipeline.transmission
     return;
   }

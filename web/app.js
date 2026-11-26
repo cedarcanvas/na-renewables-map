@@ -145,15 +145,29 @@ async function loadJSON(url) {
   return r.json();
 }
 
+// Each data file is fetched once; init() starts them all together when the page opens, so
+// the map's layers don't wait on one download after another.
+const dataCache = new Map();
+function loadData(path) {
+  if (!dataCache.has(path)) dataCache.set(path, loadJSON(dataURL(path)));
+  return dataCache.get(path);
+}
+
 async function init() {
+  for (const path of ["plants.geojson", "generation.json", "regions.geojson", "grids.geojson"]) {
+    loadData(path).catch(() => {}); // each caller handles its own failure
+  }
+  transmissionAvailable();
+  startWeatherDownload();
+
   markTheme();
   $("#theme").addEventListener("click", () =>
     setTheme(THEME_CHOICES[(THEME_CHOICES.indexOf(themeChoice) + 1) % THEME_CHOICES.length]));
   systemDark.addEventListener("change", () => themeChoice === "auto" && applyBasemap());
 
-  state.plants = await loadJSON(dataURL("plants.geojson"));
+  state.plants = await loadData("plants.geojson");
   try {
-    state.gen = await loadJSON(dataURL("generation.json"));
+    state.gen = await loadData("generation.json");
   } catch {
     state.gen = null;
   }
@@ -294,7 +308,7 @@ let hoveredRegion = null;
 async function addRegionLayers() {
   let regions;
   try {
-    regions = await loadJSON(dataURL("regions.geojson"));
+    regions = await loadData("regions.geojson");
   } catch {
     $("#show-regions").closest("label").hidden = true; // not built yet: python -m pipeline.regions
     return;

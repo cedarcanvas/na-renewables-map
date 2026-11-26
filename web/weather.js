@@ -15,10 +15,18 @@ const PARTICLE_MAX_AGE = 90;      // frames before a particle restarts somewhere
 const TRAIL_FADE = 0.92;          // share of each trail kept per frame
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
+// The wind image is the biggest download (about 5 MB for a week), so it starts at page open
+// (init) and decodes while the other layers are set up.
+let weatherDownload = null;
+function startWeatherDownload() {
+  weatherDownload ??= loadData("weather/meta.json").then(async (meta) => ({ meta, frames: await loadWindFrames(meta) }));
+  weatherDownload.catch(() => {});
+  return weatherDownload;
+}
+
 async function addWeatherLayers() {
   try {
-    weather.meta = await loadJSON(dataURL("weather/meta.json"));
-    weather.frames = await loadWindFrames(weather.meta.wind);
+    ({ meta: weather.meta, frames: weather.frames } = await startWeatherDownload());
   } catch {
     return; // not built yet: python -m pipeline.gfs
   }
@@ -35,10 +43,11 @@ async function addWeatherLayers() {
 }
 
 // The wind image stacks every hour top to bottom: red = u, green = v, 0–255 for ±range m/s.
-async function loadWindFrames(w) {
+async function loadWindFrames(meta) {
+  const w = meta.wind;
   const img = new Image();
   img.crossOrigin = "anonymous"; // its pixels are read back, which a data host on another origin must allow
-  img.src = `${dataURL(`weather/${w.file}`)}?${weather.meta.hours.at(-1)}`;
+  img.src = `${dataURL(`weather/${w.file}`)}?${meta.hours.at(-1)}`;
   await img.decode();
   const canvas = document.createElement("canvas");
   canvas.width = img.width;
@@ -48,7 +57,7 @@ async function loadWindFrames(w) {
   const px = ctx.getImageData(0, 0, img.width, img.height).data;
   const missing = new Set(w.missing);
   const cells = w.nx * w.ny;
-  return weather.meta.hours.map((_, f) => {
+  return meta.hours.map((_, f) => {
     if (missing.has(f)) return null;
     const u = new Float32Array(cells);
     const v = new Float32Array(cells);
